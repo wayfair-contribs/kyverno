@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/googleapis/gnostic/compiler"
 	openapiv2 "github.com/googleapis/gnostic/openapiv2"
-	"github.com/kyverno/kyverno/pkg/clients/dclient"
-	"github.com/kyverno/kyverno/pkg/metrics"
+	client "github.com/kyverno/kyverno/pkg/dclient"
 	util "github.com/kyverno/kyverno/pkg/utils"
-	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	runtimeSchema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -23,7 +23,7 @@ import (
 )
 
 type crdSync struct {
-	client     dclient.Interface
+	client     client.Interface
 	controller *Controller
 }
 
@@ -59,7 +59,7 @@ var crdDefinitionNew struct {
 }
 
 // NewCRDSync ...
-func NewCRDSync(client dclient.Interface, controller *Controller) *crdSync {
+func NewCRDSync(client client.Interface, controller *Controller) *crdSync {
 	if controller == nil {
 		panic(fmt.Errorf("nil controller sent into crd sync"))
 	}
@@ -86,8 +86,9 @@ func (c *crdSync) Run(workers int, stopCh <-chan struct{}) {
 	}
 	// Sync CRD before kyverno starts
 	c.sync()
+
 	for i := 0; i < workers; i++ {
-		go wait.Until(c.CheckSync, 15*time.Second, stopCh)
+		go wait.Until(c.sync, 15*time.Second, stopCh)
 	}
 }
 
@@ -97,9 +98,7 @@ func (c *crdSync) sync() {
 		Group:    "apiextensions.k8s.io",
 		Version:  "v1",
 		Resource: "customresourcedefinitions",
-	}).List(context.TODO(), metav1.ListOptions{})
-
-	c.client.RecordClientQuery(metrics.ClientList, metrics.KubeDynamicClient, "CustomResourceDefinition", "")
+	}).List(context.TODO(), v1.ListOptions{})
 	if err != nil {
 		log.Log.Error(err, "could not fetch crd's from server")
 		return
@@ -128,11 +127,12 @@ func (c *crdSync) sync() {
 
 func (c *crdSync) updateInClusterKindToAPIVersions() error {
 	util.OverrideRuntimeErrorHandler()
-	_, apiResourceLists, err := discovery.ServerGroupsAndResources(c.client.Discovery().DiscoveryInterface())
 
+	_, apiResourceLists, err := discovery.ServerGroupsAndResources(c.client.Discovery().DiscoveryInterface())
 	if err != nil && !strings.Contains(err.Error(), skipErrorMsg) {
 		return errors.Wrapf(err, "fetching API server groups and resources")
 	}
+
 	preferredAPIResourcesLists, err := discovery.ServerPreferredResources(c.client.Discovery().DiscoveryInterface())
 	if err != nil && !strings.Contains(err.Error(), skipErrorMsg) {
 		return errors.Wrapf(err, "fetching API server preferreds resources")
@@ -195,7 +195,7 @@ func (o *Controller) ParseCRD(crd unstructured.Unstructured) {
 	parsedSchema, err := openapiv2.NewSchema(&schema, compiler.NewContext("schema", &schema, nil))
 	if err != nil {
 		v3valueFound := isOpenV3Error(err)
-		if !v3valueFound {
+		if v3valueFound == false {
 			log.Log.Error(err, "failed to parse crd schema", "name", crdName)
 		}
 		return
@@ -247,19 +247,4 @@ func addingDefaultFieldsToSchema(crdName string, schemaRaw []byte) ([]byte, erro
 	schemaWithDefaultFields, _ := json.Marshal(schema)
 
 	return schemaWithDefaultFields, nil
-}
-
-func (c *crdSync) CheckSync() {
-	crds, err := c.client.GetDynamicInterface().Resource(runtimeSchema.GroupVersionResource{
-		Group:    "apiextensions.k8s.io",
-		Version:  "v1",
-		Resource: "customresourcedefinitions",
-	}).List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		log.Log.Error(err, "could not fetch crd's from server")
-		return
-	}
-	if len(c.controller.crdList) != len(crds.Items) {
-		c.sync()
-	}
 }

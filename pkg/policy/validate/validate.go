@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	commonAnchors "github.com/kyverno/kyverno/pkg/engine/anchor"
+
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/policy/common"
 )
 
 // Validate validates a 'validate' rule
 type Validate struct {
 	// rule to hold 'validate' rule specifications
-	rule *kyvernov1.Validation
+	rule *kyverno.Validation
 }
 
-// NewValidateFactory returns a new instance of Mutate validation checker
-func NewValidateFactory(rule *kyvernov1.Validation) *Validate {
+//NewValidateFactory returns a new instance of Mutate validation checker
+func NewValidateFactory(rule *kyverno.Validation) *Validate {
 	m := Validate{
 		rule: rule,
 	}
@@ -24,7 +25,7 @@ func NewValidateFactory(rule *kyvernov1.Validation) *Validate {
 	return &m
 }
 
-// Validate validates the 'validate' rule
+//Validate validates the 'validate' rule
 func (v *Validate) Validate() (string, error) {
 	if err := v.validateElements(); err != nil {
 		return "", err
@@ -72,7 +73,7 @@ func (v *Validate) validateElements() error {
 	return nil
 }
 
-func validationElemCount(v *kyvernov1.Validation) int {
+func validationElemCount(v *kyverno.Validation) int {
 	if v == nil {
 		return 0
 	}
@@ -94,18 +95,10 @@ func validationElemCount(v *kyvernov1.Validation) int {
 		count++
 	}
 
-	if v.PodSecurity != nil {
-		count++
-	}
-
-	if v.Manifests != nil && len(v.Manifests.Attestors) != 0 {
-		count++
-	}
-
 	return count
 }
 
-func (v *Validate) validateForEach(foreach kyvernov1.ForEachValidation) error {
+func (v *Validate) validateForEach(foreach kyverno.ForEachValidation) error {
 	if foreach.List == "" {
 		return fmt.Errorf("foreach.list is required")
 	}
@@ -126,7 +119,7 @@ func (v *Validate) validateForEach(foreach kyvernov1.ForEachValidation) error {
 	return nil
 }
 
-func foreachElemCount(foreach kyvernov1.ForEachValidation) int {
+func foreachElemCount(foreach kyverno.ForEachValidation) int {
 	count := 0
 	if foreach.GetPattern() != nil {
 		count++

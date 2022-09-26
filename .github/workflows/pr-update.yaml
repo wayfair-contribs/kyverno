@@ -5,7 +5,6 @@ on:
     branches:
       - 'main'
       - 'release-*'
-
 jobs:
   autoupdate:
     permissions:
@@ -16,8 +15,8 @@ jobs:
         uses: adRise/update-pr-branch@437fab6e0ac7d2a668f2c479f64225edd7f303fd # v0.6.0
         with:
           token: ${{ secrets.PR_UPDATE_TOKEN }}
-          base: ${{ github.ref_name }}
+          base: ${{ env.GITHUB_REF_NAME }}
           required_approval_count: 1
-          require_passed_checks: false
+          require_passed_checks: true
           sort: 'updated'
           direction: 'asc'

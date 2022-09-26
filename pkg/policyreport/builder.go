@@ -3,19 +3,20 @@ package policyreport
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
-	kyvernov1alpha2 "github.com/kyverno/kyverno/api/kyverno/v1alpha2"
-	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
-	kyvernov1listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
+	request "github.com/kyverno/kyverno/api/kyverno/v1alpha2"
+	report "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
+	kyvernolister "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/config"
 	"github.com/kyverno/kyverno/pkg/engine"
 	"github.com/kyverno/kyverno/pkg/engine/response"
 	"github.com/kyverno/kyverno/pkg/toggle"
 	"github.com/kyverno/kyverno/pkg/version"
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,14 +47,14 @@ const (
 
 func GeneratePolicyReportName(ns, policyName string) string {
 	if ns == "" {
-		if toggle.SplitPolicyReport.Enabled() {
+		if toggle.SplitPolicyReport() {
 			return TrimmedName(clusterpolicyreport + "-" + policyName)
 		}
 		return clusterpolicyreport
 	}
 
 	var name string
-	if toggle.SplitPolicyReport.Enabled() {
+	if toggle.SplitPolicyReport() {
 		name = fmt.Sprintf("polr-ns-%s-%s", ns, policyName)
 	} else {
 		name = fmt.Sprintf("polr-ns-%s", ns)
@@ -103,17 +104,17 @@ type Builder interface {
 }
 
 type requestBuilder struct {
-	cpolLister kyvernov1listers.ClusterPolicyLister
-	polLister  kyvernov1listers.PolicyLister
+	cpolLister kyvernolister.ClusterPolicyLister
+	polLister  kyvernolister.PolicyLister
 }
 
 // NewBuilder ...
-func NewBuilder(cpolLister kyvernov1listers.ClusterPolicyLister, polLister kyvernov1listers.PolicyLister) Builder {
+func NewBuilder(cpolLister kyvernolister.ClusterPolicyLister, polLister kyvernolister.PolicyLister) Builder {
 	return &requestBuilder{cpolLister: cpolLister, polLister: polLister}
 }
 
 func (builder *requestBuilder) build(info Info) (req *unstructured.Unstructured, err error) {
-	results := []policyreportv1alpha2.PolicyReportResult{}
+	results := []report.PolicyReportResult{}
 	req = new(unstructured.Unstructured)
 	for _, infoResult := range info.Results {
 		for _, rule := range infoResult.Rules {
@@ -127,12 +128,12 @@ func (builder *requestBuilder) build(info Info) (req *unstructured.Unstructured,
 	}
 
 	if info.Namespace != "" {
-		rr := &kyvernov1alpha2.ReportChangeRequest{
+		rr := &request.ReportChangeRequest{
 			Summary: calculateSummary(results),
 			Results: results,
 		}
 
-		gv := policyreportv1alpha2.SchemeGroupVersion
+		gv := report.SchemeGroupVersion
 		rr.SetGroupVersionKind(schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: "ReportChangeRequest"})
 
 		rawRcr, err := json.Marshal(rr)
@@ -147,12 +148,12 @@ func (builder *requestBuilder) build(info Info) (req *unstructured.Unstructured,
 
 		set(req, info)
 	} else {
-		rr := &kyvernov1alpha2.ClusterReportChangeRequest{
+		rr := &request.ClusterReportChangeRequest{
 			Summary: calculateSummary(results),
 			Results: results,
 		}
 
-		gv := policyreportv1alpha2.SchemeGroupVersion
+		gv := report.SchemeGroupVersion
 		rr.SetGroupVersionKind(schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: "ClusterReportChangeRequest"})
 
 		rawRcr, err := json.Marshal(rr)
@@ -179,12 +180,12 @@ func (builder *requestBuilder) build(info Info) (req *unstructured.Unstructured,
 	return req, nil
 }
 
-func (builder *requestBuilder) buildRCRResult(policy string, resource response.ResourceSpec, rule kyvernov1.ViolatedRule) policyreportv1alpha2.PolicyReportResult {
+func (builder *requestBuilder) buildRCRResult(policy string, resource response.ResourceSpec, rule kyverno.ViolatedRule) report.PolicyReportResult {
 	av := builder.fetchAnnotationValues(policy, resource.Namespace)
 
-	result := policyreportv1alpha2.PolicyReportResult{
+	result := report.PolicyReportResult{
 		Policy: policy,
-		Resources: []corev1.ObjectReference{
+		Resources: []v1.ObjectReference{
 			{
 				Kind:       resource.Kind,
 				Namespace:  resource.Namespace,
@@ -200,7 +201,7 @@ func (builder *requestBuilder) buildRCRResult(policy string, resource response.R
 
 	result.Rule = rule.Name
 	result.Message = rule.Message
-	result.Result = policyreportv1alpha2.PolicyResult(rule.Status)
+	result.Result = report.PolicyResult(rule.Status)
 	if result.Result == "fail" && !av.scored {
 		result.Result = "warn"
 	}
@@ -212,7 +213,7 @@ func (builder *requestBuilder) buildRCRResult(policy string, resource response.R
 }
 
 func set(obj *unstructured.Unstructured, info Info) {
-	obj.SetAPIVersion(kyvernov1alpha2.SchemeGroupVersion.Group + "/" + kyvernov1alpha2.SchemeGroupVersion.Version)
+	obj.SetAPIVersion(request.SchemeGroupVersion.Group + "/" + request.SchemeGroupVersion.Version)
 
 	if info.Namespace == "" {
 		obj.SetGenerateName("crcr-")
@@ -220,7 +221,7 @@ func set(obj *unstructured.Unstructured, info Info) {
 	} else {
 		obj.SetGenerateName("rcr-")
 		obj.SetKind("ReportChangeRequest")
-		obj.SetNamespace(config.KyvernoNamespace())
+		obj.SetNamespace(config.KyvernoNamespace)
 	}
 
 	obj.SetLabels(map[string]string{
@@ -232,7 +233,7 @@ func set(obj *unstructured.Unstructured, info Info) {
 
 func setRequestDeletionLabels(req *unstructured.Unstructured, info Info) bool {
 	switch {
-	case info.isResourceDeletion():
+	case isResourceDeletion(info):
 		req.SetAnnotations(map[string]string{
 			deletedAnnotationResourceName: info.Results[0].Resource.Name,
 			deletedAnnotationResourceKind: info.Results[0].Resource.Kind,
@@ -243,7 +244,7 @@ func setRequestDeletionLabels(req *unstructured.Unstructured, info Info) bool {
 		req.SetLabels(labels)
 		return true
 
-	case info.isPolicyDeletion():
+	case isPolicyDeletion(info):
 		req.SetKind("ReportChangeRequest")
 		req.SetGenerateName("rcr-")
 
@@ -252,7 +253,7 @@ func setRequestDeletionLabels(req *unstructured.Unstructured, info Info) bool {
 		req.SetLabels(labels)
 		return true
 
-	case info.isRuleDeletion():
+	case isRuleDeletion(info):
 		req.SetKind("ReportChangeRequest")
 		req.SetGenerateName("rcr-")
 
@@ -266,18 +267,18 @@ func setRequestDeletionLabels(req *unstructured.Unstructured, info Info) bool {
 	return false
 }
 
-func calculateSummary(results []policyreportv1alpha2.PolicyReportResult) (summary policyreportv1alpha2.PolicyReportSummary) {
+func calculateSummary(results []report.PolicyReportResult) (summary report.PolicyReportSummary) {
 	for _, res := range results {
 		switch string(res.Result) {
-		case policyreportv1alpha2.StatusPass:
+		case report.StatusPass:
 			summary.Pass++
-		case policyreportv1alpha2.StatusFail:
+		case report.StatusFail:
 			summary.Fail++
-		case policyreportv1alpha2.StatusWarn:
+		case report.StatusWarn:
 			summary.Warn++
-		case policyreportv1alpha2.StatusError:
+		case report.StatusError:
 			summary.Error++
-		case policyreportv1alpha2.StatusSkip:
+		case report.StatusSkip:
 			summary.Skip++
 		}
 	}
@@ -298,10 +299,10 @@ func buildPVInfo(er *response.EngineResponse) Info {
 	return info
 }
 
-func buildViolatedRules(er *response.EngineResponse) []kyvernov1.ViolatedRule {
-	var violatedRules []kyvernov1.ViolatedRule
+func buildViolatedRules(er *response.EngineResponse) []kyverno.ViolatedRule {
+	var violatedRules []kyverno.ViolatedRule
 	for _, rule := range er.PolicyResponse.Rules {
-		vrule := kyvernov1.ViolatedRule{
+		vrule := kyverno.ViolatedRule{
 			Name:    rule.Name,
 			Type:    string(rule.Type),
 			Message: rule.Message,
@@ -317,40 +318,38 @@ func buildViolatedRules(er *response.EngineResponse) []kyvernov1.ViolatedRule {
 func toPolicyResult(status response.RuleStatus) string {
 	switch status {
 	case response.RuleStatusPass:
-		return policyreportv1alpha2.StatusPass
+		return report.StatusPass
 	case response.RuleStatusFail:
-		return policyreportv1alpha2.StatusFail
+		return report.StatusFail
 	case response.RuleStatusError:
-		return policyreportv1alpha2.StatusError
+		return report.StatusError
 	case response.RuleStatusWarn:
-		return policyreportv1alpha2.StatusWarn
+		return report.StatusWarn
 	case response.RuleStatusSkip:
-		return policyreportv1alpha2.StatusSkip
+		return report.StatusSkip
 	}
 
 	return ""
 }
 
-const (
-	categoryLabel string = "policies.kyverno.io/category"
-	severityLabel string = "policies.kyverno.io/severity"
-	ScoredLabel   string = "policies.kyverno.io/scored"
-)
+const categoryLabel string = "policies.kyverno.io/category"
+const severityLabel string = "policies.kyverno.io/severity"
+const ScoredLabel string = "policies.kyverno.io/scored"
 
 type annotationValues struct {
 	category string
-	severity policyreportv1alpha2.PolicySeverity
+	severity report.PolicySeverity
 	scored   bool
 }
 
 func (av *annotationValues) setSeverityFromString(severity string) {
 	switch severity {
-	case policyreportv1alpha2.SeverityHigh:
-		av.severity = policyreportv1alpha2.SeverityHigh
-	case policyreportv1alpha2.SeverityMedium:
-		av.severity = policyreportv1alpha2.SeverityMedium
-	case policyreportv1alpha2.SeverityLow:
-		av.severity = policyreportv1alpha2.SeverityLow
+	case report.SeverityHigh:
+		av.severity = report.SeverityHigh
+	case report.SeverityMedium:
+		av.severity = report.SeverityMedium
+	case report.SeverityLow:
+		av.severity = report.SeverityLow
 	}
 }
 
@@ -393,4 +392,22 @@ func (builder *requestBuilder) fetchAnnotations(policy, ns string) map[string]st
 	}
 
 	return make(map[string]string)
+}
+
+func isResourceDeletion(info Info) bool {
+	return info.PolicyName == "" && len(info.Results) == 1 && info.GetRuleLength() == 0
+}
+
+func isPolicyDeletion(info Info) bool {
+	return info.PolicyName != "" && len(info.Results) == 0
+}
+
+func isRuleDeletion(info Info) bool {
+	if info.PolicyName != "" && len(info.Results) == 1 {
+		result := info.Results[0]
+		if len(result.Rules) == 1 && reflect.DeepEqual(result.Resource, response.ResourceSpec{}) {
+			return true
+		}
+	}
+	return false
 }

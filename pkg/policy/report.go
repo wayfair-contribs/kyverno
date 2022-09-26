@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/kyverno/kyverno/api/policyreport/v1alpha2"
-	"github.com/kyverno/kyverno/pkg/client/clientset/versioned"
+	kyvernoclient "github.com/kyverno/kyverno/pkg/client/clientset/versioned"
 	kyvernov1alpha2listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1alpha2"
 	policyreportv1alpha2listers "github.com/kyverno/kyverno/pkg/client/listers/policyreport/v1alpha2"
 	"github.com/kyverno/kyverno/pkg/config"
@@ -114,7 +114,7 @@ func (pc *PolicyController) forceReconciliation(reconcileCh <-chan bool, cleanup
 	}
 }
 
-func cleanupReportChangeRequests(pclient versioned.Interface, rcrLister kyvernov1alpha2listers.ReportChangeRequestLister, crcrLister kyvernov1alpha2listers.ClusterReportChangeRequestLister, nslabels map[string]string) error {
+func cleanupReportChangeRequests(pclient kyvernoclient.Interface, rcrLister kyvernov1alpha2listers.ReportChangeRequestLister, crcrLister kyvernov1alpha2listers.ClusterReportChangeRequestLister, nslabels map[string]string) error {
 	var errors []string
 	var gracePeriod int64 = 0
 	deleteOptions := metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}
@@ -126,7 +126,7 @@ func cleanupReportChangeRequests(pclient versioned.Interface, rcrLister kyvernov
 		errors = append(errors, err.Error())
 	}
 
-	err = pclient.KyvernoV1alpha2().ReportChangeRequests(config.KyvernoNamespace()).DeleteCollection(context.TODO(), deleteOptions, metav1.ListOptions{LabelSelector: selector.String()})
+	err = pclient.KyvernoV1alpha2().ReportChangeRequests(config.KyvernoNamespace).DeleteCollection(context.TODO(), deleteOptions, metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		errors = append(errors, err.Error())
 	}
@@ -138,7 +138,7 @@ func cleanupReportChangeRequests(pclient versioned.Interface, rcrLister kyvernov
 	return fmt.Errorf("%v", strings.Join(errors, ";"))
 }
 
-func eraseResultEntries(pclient versioned.Interface, reportLister policyreportv1alpha2listers.PolicyReportLister, clusterReportLister policyreportv1alpha2listers.ClusterPolicyReportLister, ns *string) error {
+func eraseResultEntries(pclient kyvernoclient.Interface, reportLister policyreportv1alpha2listers.PolicyReportLister, clusterReportLister policyreportv1alpha2listers.ClusterPolicyReportLister, ns *string) error {
 	selector, err := metav1.LabelSelectorAsSelector(policyreport.LabelSelector)
 	if err != nil {
 		return fmt.Errorf("failed to erase results entries %v", err)
@@ -148,7 +148,7 @@ func eraseResultEntries(pclient versioned.Interface, reportLister policyreportv1
 	var polrName string
 
 	if ns != nil {
-		if toggle.SplitPolicyReport.Enabled() {
+		if toggle.SplitPolicyReport() {
 			err = eraseSplitResultEntries(pclient, ns, selector)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("%v", err))
@@ -217,7 +217,7 @@ func eraseResultEntries(pclient versioned.Interface, reportLister policyreportv1
 	return fmt.Errorf("failed to erase results entries %v", strings.Join(errors, ";"))
 }
 
-func eraseSplitResultEntries(pclient versioned.Interface, ns *string, selector labels.Selector) error {
+func eraseSplitResultEntries(pclient kyvernoclient.Interface, ns *string, selector labels.Selector) error {
 	var errors []string
 
 	if ns != nil {
@@ -308,16 +308,13 @@ func generateFailEventsPerEr(log logr.Logger, er *response.EngineResponse) []eve
 	for i, rule := range er.PolicyResponse.Rules {
 		if rule.Status == response.RuleStatusPass {
 			continue
-		} else if rule.Status == response.RuleStatusSkip {
-			eventResource := event.NewPolicySkippedEvent(event.PolicyController, event.PolicySkipped, er, &er.PolicyResponse.Rules[i])
-			eventInfos = append(eventInfos, eventResource)
-		} else {
-			eventResource := event.NewResourceViolationEvent(event.PolicyController, event.PolicyViolation, er, &er.PolicyResponse.Rules[i])
-			eventInfos = append(eventInfos, eventResource)
-
-			eventPolicy := event.NewPolicyFailEvent(event.PolicyController, event.PolicyViolation, er, &er.PolicyResponse.Rules[i], false)
-			eventInfos = append(eventInfos, eventPolicy)
 		}
+
+		eventResource := event.NewResourceViolationEvent(event.PolicyController, event.PolicyViolation, er, &er.PolicyResponse.Rules[i])
+		eventInfos = append(eventInfos, eventResource)
+
+		eventPolicy := event.NewPolicyFailEvent(event.PolicyController, event.PolicyViolation, er, &er.PolicyResponse.Rules[i], false)
+		eventInfos = append(eventInfos, eventPolicy)
 	}
 
 	if len(eventInfos) > 0 {
@@ -341,6 +338,7 @@ func mergePvInfos(infos []policyreport.Info) []policyreport.Info {
 			tmpInfo.Results = append(tmpInfo.Results, info.Results...)
 			aggregatedInfoPerNamespace[info.Namespace] = tmpInfo
 		}
+
 	}
 
 	for _, i := range aggregatedInfoPerNamespace {

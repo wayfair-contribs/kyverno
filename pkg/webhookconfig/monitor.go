@@ -16,7 +16,7 @@ import (
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 )
 
-// maxRetryCount defines the max deadline count
+//maxRetryCount defines the max deadline count
 const (
 	tickerInterval    time.Duration = 30 * time.Second
 	idleCheckInterval time.Duration = 60 * time.Second
@@ -36,9 +36,11 @@ const (
 // latestTimestamp is longer than idleCheckInterval, the monitor triggers an
 // annotation update; otherwise lastSeenRequestTime is updated to latestTimestamp.
 //
+//
 // Webhook configurations are checked every tickerInterval across all instances.
 // Currently the check only queries for the expected resource name, and does
 // not compare other details like the webhook settings.
+//
 type Monitor struct {
 	// leaseClient is used to manage Kyverno lease
 	leaseClient coordinationv1.LeaseInterface
@@ -54,7 +56,7 @@ type Monitor struct {
 // NewMonitor returns a new instance of webhook monitor
 func NewMonitor(kubeClient kubernetes.Interface, log logr.Logger) (*Monitor, error) {
 	monitor := &Monitor{
-		leaseClient:         kubeClient.CoordinationV1().Leases(config.KyvernoNamespace()),
+		leaseClient:         kubeClient.CoordinationV1().Leases(config.KyvernoNamespace),
 		lastSeenRequestTime: time.Now(),
 		log:                 log,
 	}
@@ -204,6 +206,7 @@ func registerWebhookIfNotPresent(register *Register, logger logr.Logger) error {
 }
 
 func lastRequestTimeFromAnnotation(leaseClient coordinationv1.LeaseInterface, logger logr.Logger) *time.Time {
+
 	lease, err := leaseClient.Get(context.TODO(), "kyverno", metav1.GetOptions{})
 	if err != nil {
 		logger.Info("Lease 'kyverno' not found. Starting clean-up...")
@@ -231,5 +234,6 @@ func skipWebhookCheck(register *Register, logger logr.Logger) bool {
 		logger.Info("unable to get Kyverno deployment", "reason", err.Error())
 		return false
 	}
-	return tls.IsKyvernoInRollingUpdate(deploy)
+
+	return tls.IsKyvernoInRollingUpdate(deploy, logger)
 }

@@ -65,9 +65,6 @@ spec:
       dnsPolicy: {{ .Values.dnsPolicy }}
       {{- end }}
       initContainers:
-      {{- if .Values.extraInitContainers }}
-        {{- toYaml .Values.extraInitContainers | nindent 8 }}
-      {{- end }}
         - name: kyverno-pre
           image: {{ .Values.initImage.repository }}:{{ default .Chart.AppVersion (default .Values.image.tag .Values.initImage.tag) }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.initImage.pullPolicy }}
@@ -90,9 +87,6 @@ spec:
           {{- toYaml . | nindent 10 }}
           {{- end }}
       containers:
-      {{- if .Values.extraContainers }}
-        {{- toYaml .Values.extraContainers | nindent 8 }}
-      {{- end }}
         - name: kyverno
           image: {{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -131,8 +125,6 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
-          - name: KYVERNO_SERVICEACCOUNT_NAME
-            value: {{ template "kyverno.serviceAccountName" . }}
           - name: KYVERNO_SVC
             value: {{ template "kyverno.serviceName" . }}
           - name: TUF_ROOT

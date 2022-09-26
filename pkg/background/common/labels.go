@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	kyvernov1beta1 "github.com/kyverno/kyverno/api/kyverno/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	pkglabels "k8s.io/apimachinery/pkg/labels"
@@ -71,12 +70,12 @@ func GenerateLabelsSet(policyKey string, trigger Object) pkglabels.Set {
 
 func managedBy(labels map[string]string) {
 	// ManagedBy label
-	key := kyvernov1.LabelAppManagedBy
-	value := kyvernov1.ValueKyvernoApp
+	key := "app.kubernetes.io/managed-by"
+	value := "kyverno"
 	val, ok := labels[key]
 	if ok {
 		if val != value {
-			log.Log.V(2).Info(fmt.Sprintf("resource managed by %s, kyverno wont over-ride the label", val))
+			log.Log.Info(fmt.Sprintf("resource managed by %s, kyverno wont over-ride the label", val))
 			return
 		}
 	}
@@ -104,7 +103,7 @@ func checkGeneratedBy(labels map[string]string, key, value string) {
 	val, ok := labels[key]
 	if ok {
 		if val != value {
-			log.Log.V(2).Info(fmt.Sprintf("kyverno wont over-ride the label %s", key))
+			log.Log.Info(fmt.Sprintf("kyverno wont over-ride the label %s", key))
 			return
 		}
 	}

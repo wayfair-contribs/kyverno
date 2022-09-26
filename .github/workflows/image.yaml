@@ -12,9 +12,10 @@ permissions:
 
 jobs:
   push-init-kyverno:
-    uses: ./.github/workflows/reuse.yaml
+    uses: kyverno/kyverno/.github/workflows/reuse.yaml@main
     with:
-      publish_command: ko-publish-kyvernopre
+      publish_command: docker-publish-initContainer
+      digest_command: docker-get-initContainer-digest
       image_name: kyvernopre
       tag: image
     secrets:
@@ -22,9 +23,10 @@ jobs:
       registry_password: ${{ secrets.CR_PAT }}
 
   push-kyverno:
-    uses: ./.github/workflows/reuse.yaml
+    uses: kyverno/kyverno/.github/workflows/reuse.yaml@main
     with:
-      publish_command: ko-publish-kyverno
+      publish_command: docker-publish-kyverno
+      digest_command: docker-get-kyverno-digest
       image_name: kyverno
       tag: image
     secrets:
@@ -32,9 +34,10 @@ jobs:
       registry_password: ${{ secrets.CR_PAT }}
 
   push-kyverno-cli:
-    uses: ./.github/workflows/reuse.yaml
+    uses: kyverno/kyverno/.github/workflows/reuse.yaml@main
     with:
-      publish_command: ko-publish-cli
+      publish_command: docker-publish-cli
+      digest_command: docker-get-cli-digest
       image_name: kyverno-cli
       tag: image
     secrets:

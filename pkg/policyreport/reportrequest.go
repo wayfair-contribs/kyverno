@@ -3,42 +3,46 @@ package policyreport
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/kyverno/kyverno/pkg/client/clientset/versioned"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
+	policyreportclient "github.com/kyverno/kyverno/pkg/client/clientset/versioned"
 	kyvernov1informers "github.com/kyverno/kyverno/pkg/client/informers/externalversions/kyverno/v1"
 	kyvernov1alpha2informers "github.com/kyverno/kyverno/pkg/client/informers/externalversions/kyverno/v1alpha2"
-	kyvernov1listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1"
-	kyvernov1alpha2listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1alpha2"
+	kyvernolister "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1"
+	requestlister "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1alpha2"
+	dclient "github.com/kyverno/kyverno/pkg/dclient"
+	"github.com/kyverno/kyverno/pkg/engine/response"
+	cmap "github.com/orcaman/concurrent-map"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
 
-const (
-	workQueueName       = "report-request-controller"
-	workQueueRetryLimit = 10
-)
+const workQueueName = "report-request-controller"
+const workQueueRetryLimit = 10
 
 // Generator creates report request
 type Generator struct {
-	reportChangeRequestLister kyvernov1alpha2listers.ReportChangeRequestLister
+	dclient dclient.Interface
 
-	clusterReportChangeRequestLister kyvernov1alpha2listers.ClusterReportChangeRequestLister
+	reportChangeRequestLister requestlister.ReportChangeRequestLister
+
+	clusterReportChangeRequestLister requestlister.ClusterReportChangeRequestLister
 
 	// changeRequestMapper stores the change requests' count per namespace
 	changeRequestMapper concurrentMap
-	mutex               *sync.RWMutex
 
 	// cpolLister can list/get policy from the shared informer's store
-	cpolLister kyvernov1listers.ClusterPolicyLister
+	cpolLister kyvernolister.ClusterPolicyLister
 
 	// polLister can list/get namespace policy from the shared informer's store
-	polLister kyvernov1listers.PolicyLister
+	polLister kyvernolister.PolicyLister
 
 	informersSynced []cache.InformerSynced
 
@@ -57,7 +61,8 @@ type Generator struct {
 }
 
 // NewReportChangeRequestGenerator returns a new instance of report request generator
-func NewReportChangeRequestGenerator(client versioned.Interface,
+func NewReportChangeRequestGenerator(client policyreportclient.Interface,
+	dclient dclient.Interface,
 	reportReqInformer kyvernov1alpha2informers.ReportChangeRequestInformer,
 	clusterReportReqInformer kyvernov1alpha2informers.ClusterReportChangeRequestInformer,
 	cpolInformer kyvernov1informers.ClusterPolicyInformer,
@@ -66,10 +71,10 @@ func NewReportChangeRequestGenerator(client versioned.Interface,
 	log logr.Logger,
 ) *Generator {
 	gen := Generator{
+		dclient:                          dclient,
 		clusterReportChangeRequestLister: clusterReportReqInformer.Lister(),
 		reportChangeRequestLister:        reportReqInformer.Lister(),
-		changeRequestMapper:              newConcurrentMap(),
-		mutex:                            &sync.RWMutex{},
+		changeRequestMapper:              newChangeRequestMapper(),
 		cpolLister:                       cpolInformer.Lister(),
 		polLister:                        polInformer.Lister(),
 		queue:                            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), workQueueName),
@@ -81,6 +86,7 @@ func NewReportChangeRequestGenerator(client versioned.Interface,
 	}
 
 	gen.informersSynced = []cache.InformerSynced{clusterReportReqInformer.Informer().HasSynced, reportReqInformer.Informer().HasSynced, cpolInformer.Informer().HasSynced, polInformer.Informer().HasSynced}
+
 	return &gen
 }
 
@@ -121,6 +127,40 @@ func (ds *dataStore) delete(keyHash string) {
 	delete(ds.data, keyHash)
 }
 
+// Info stores the policy application results for all matched resources
+// Namespace is set to empty "" if resource is cluster wide resource
+type Info struct {
+	PolicyName string
+	Namespace  string
+	Results    []EngineResponseResult
+}
+
+type EngineResponseResult struct {
+	Resource response.ResourceSpec
+	Rules    []kyverno.ViolatedRule
+}
+
+func (i Info) ToKey() string {
+	keys := []string{
+		i.PolicyName,
+		i.Namespace,
+		strconv.Itoa(len(i.Results)),
+	}
+
+	for _, result := range i.Results {
+		keys = append(keys, result.Resource.GetKey())
+	}
+	return strings.Join(keys, "/")
+}
+
+func (i Info) GetRuleLength() int {
+	l := 0
+	for _, res := range i.Results {
+		l += len(res.Rules)
+	}
+	return l
+}
+
 func parseKeyHash(keyHash string) (policyName, ns string) {
 	keys := strings.Split(keyHash, "/")
 	return keys[0], keys[1]
@@ -142,8 +182,6 @@ func (gen *Generator) enqueue(info Info) {
 
 // Add queues a policy violation create request
 func (gen *Generator) Add(infos ...Info) {
-	gen.mutex.Lock()
-	defer gen.mutex.Unlock()
 	for _, info := range infos {
 		count, ok := gen.changeRequestMapper.ConcurrentMap.Get(info.Namespace)
 		if ok && count == -1 {
@@ -158,23 +196,17 @@ func (gen *Generator) Add(infos ...Info) {
 
 // MapperReset resets the change request mapper for the given namespace
 func (gen Generator) MapperReset(ns string) {
-	gen.mutex.Lock()
-	defer gen.mutex.Unlock()
 	gen.changeRequestMapper.ConcurrentMap.Set(ns, 0)
 }
 
 // MapperInactive sets the change request mapper for the given namespace to -1
 // which indicates the report is inactive
 func (gen Generator) MapperInactive(ns string) {
-	gen.mutex.Lock()
-	defer gen.mutex.Unlock()
 	gen.changeRequestMapper.ConcurrentMap.Set(ns, -1)
 }
 
 // MapperInvalidate reset map entries
 func (gen Generator) MapperInvalidate() {
-	gen.mutex.Lock()
-	defer gen.mutex.Unlock()
 	for ns := range gen.changeRequestMapper.ConcurrentMap.Items() {
 		gen.changeRequestMapper.ConcurrentMap.Remove(ns)
 	}
@@ -304,4 +336,8 @@ func hasResultsChanged(old, new map[string]interface{}) bool {
 	}
 
 	return !reflect.DeepEqual(oldRes, newRes)
+}
+
+func newChangeRequestMapper() concurrentMap {
+	return concurrentMap{cmap.New()}
 }

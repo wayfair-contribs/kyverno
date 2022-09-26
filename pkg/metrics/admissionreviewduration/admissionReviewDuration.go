@@ -6,30 +6,33 @@ import (
 	"github.com/kyverno/kyverno/pkg/engine/response"
 	"github.com/kyverno/kyverno/pkg/metrics"
 	"github.com/kyverno/kyverno/pkg/utils"
+	prom "github.com/prometheus/client_golang/prometheus"
 )
 
 func registerAdmissionReviewDurationMetric(
-	m *metrics.MetricsConfig,
+	pc *metrics.PromConfig,
 	resourceKind, resourceNamespace string,
 	resourceRequestOperation metrics.ResourceRequestOperation,
 	admissionRequestLatency float64,
 ) error {
-	includeNamespaces, excludeNamespaces := m.Config.GetIncludeNamespaces(), m.Config.GetExcludeNamespaces()
+	includeNamespaces, excludeNamespaces := pc.Config.GetIncludeNamespaces(), pc.Config.GetExcludeNamespaces()
 	if (resourceNamespace != "" && resourceNamespace != "-") && utils.ContainsString(excludeNamespaces, resourceNamespace) {
-		m.Log.V(2).Info(fmt.Sprintf("Skipping the registration of kyverno_admission_review_duration_seconds metric as the operation belongs to the namespace '%s' which is one of 'namespaces.exclude' %+v in values.yaml", resourceNamespace, excludeNamespaces))
+		metrics.Logger().Info(fmt.Sprintf("Skipping the registration of kyverno_admission_review_duration_seconds metric as the operation belongs to the namespace '%s' which is one of 'namespaces.exclude' %+v in values.yaml", resourceNamespace, excludeNamespaces))
 		return nil
 	}
 	if (resourceNamespace != "" && resourceNamespace != "-") && len(includeNamespaces) > 0 && !utils.ContainsString(includeNamespaces, resourceNamespace) {
-		m.Log.V(2).Info(fmt.Sprintf("Skipping the registration of kyverno_admission_review_duration_seconds metric as the operation belongs to the namespace '%s' which is not one of 'namespaces.include' %+v in values.yaml", resourceNamespace, includeNamespaces))
+		metrics.Logger().Info(fmt.Sprintf("Skipping the registration of kyverno_admission_review_duration_seconds metric as the operation belongs to the namespace '%s' which is not one of 'namespaces.include' %+v in values.yaml", resourceNamespace, includeNamespaces))
 		return nil
 	}
-
-	m.RecordAdmissionReviewDuration(resourceKind, resourceNamespace, string(resourceRequestOperation), admissionRequestLatency)
-
+	pc.Metrics.AdmissionReviewDuration.With(prom.Labels{
+		"resource_kind":              resourceKind,
+		"resource_namespace":         resourceNamespace,
+		"resource_request_operation": string(resourceRequestOperation),
+	}).Observe(admissionRequestLatency)
 	return nil
 }
 
-func ProcessEngineResponses(m *metrics.MetricsConfig, engineResponses []*response.EngineResponse, admissionReviewLatencyDuration int64, resourceRequestOperation metrics.ResourceRequestOperation) error {
+func ProcessEngineResponses(pc *metrics.PromConfig, engineResponses []*response.EngineResponse, admissionReviewLatencyDuration int64, resourceRequestOperation metrics.ResourceRequestOperation) error {
 	if len(engineResponses) == 0 {
 		return nil
 	}
@@ -51,5 +54,5 @@ func ProcessEngineResponses(m *metrics.MetricsConfig, engineResponses []*respons
 		return nil
 	}
 	admissionReviewLatencyDurationInSeconds := float64(admissionReviewLatencyDuration) / float64(1000*1000*1000)
-	return registerAdmissionReviewDurationMetric(m, resourceKind, resourceNamespace, resourceRequestOperation, admissionReviewLatencyDurationInSeconds)
+	return registerAdmissionReviewDurationMetric(pc, resourceKind, resourceNamespace, resourceRequestOperation, admissionReviewLatencyDurationInSeconds)
 }

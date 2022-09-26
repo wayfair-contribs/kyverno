@@ -17,7 +17,7 @@ limitations under the License.
 package v1alpha2
 
 import (
-	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
+	report "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -53,23 +53,11 @@ type ClusterReportChangeRequest struct {
 
 	// PolicyReportSummary provides a summary of results
 	// +optional
-	Summary policyreportv1alpha2.PolicyReportSummary `json:"summary,omitempty"`
+	Summary report.PolicyReportSummary `json:"summary,omitempty"`
 
 	// PolicyReportResult provides result details
 	// +optional
-	Results []policyreportv1alpha2.PolicyReportResult `json:"results,omitempty"`
-}
-
-func (r *ClusterReportChangeRequest) GetResults() []policyreportv1alpha2.PolicyReportResult {
-	return r.Results
-}
-
-func (r *ClusterReportChangeRequest) SetResults(results []policyreportv1alpha2.PolicyReportResult) {
-	r.Results = results
-}
-
-func (r *ClusterReportChangeRequest) SetSummary(summary policyreportv1alpha2.PolicyReportSummary) {
-	r.Summary = summary
+	Results []report.PolicyReportResult `json:"results,omitempty"`
 }
 
 // +kubebuilder:object:root=true

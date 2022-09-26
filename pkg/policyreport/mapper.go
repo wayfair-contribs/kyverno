@@ -22,7 +22,3 @@ func (m concurrentMap) decrease(keyHash string) {
 		m.Set(ns, 0)
 	}
 }
-
-func newConcurrentMap() concurrentMap {
-	return concurrentMap{cmap.New()}
-}

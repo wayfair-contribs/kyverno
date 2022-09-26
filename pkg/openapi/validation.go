@@ -9,7 +9,7 @@ import (
 
 	"github.com/googleapis/gnostic/compiler"
 	openapiv2 "github.com/googleapis/gnostic/openapiv2"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	v1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/data"
 	"github.com/kyverno/kyverno/pkg/autogen"
 	"github.com/kyverno/kyverno/pkg/engine"
@@ -25,10 +25,6 @@ import (
 )
 
 type concurrentMap struct{ cmap.ConcurrentMap }
-
-type ValidateInterface interface {
-	ValidateResource(resource unstructured.Unstructured, apiVersion, kind string) error
-}
 
 // Controller represents OpenAPIController
 type Controller struct {
@@ -50,7 +46,7 @@ type Controller struct {
 	kindToAPIVersions concurrentMap
 }
 
-// apiVersions stores all available gvks for a kind, a gvk is "/" separated string
+// apiVersions stores all available gvks for a kind, a gvk is "/" seperated string
 type apiVersions struct {
 	serverPreferredGVK string
 	gvks               []string
@@ -139,8 +135,8 @@ func (o *Controller) ValidateResource(patchedResource unstructured.Unstructured,
 }
 
 // ValidatePolicyMutation ...
-func (o *Controller) ValidatePolicyMutation(policy kyvernov1.PolicyInterface) error {
-	kindToRules := make(map[string][]kyvernov1.Rule)
+func (o *Controller) ValidatePolicyMutation(policy v1.PolicyInterface) error {
+	var kindToRules = make(map[string][]v1.Rule)
 	for _, rule := range autogen.ComputeRules(policy) {
 		if rule.HasMutate() {
 			for _, kind := range rule.MatchResources.Kinds {
@@ -155,7 +151,7 @@ func (o *Controller) ValidatePolicyMutation(policy kyvernov1.PolicyInterface) er
 		spec.SetRules(rules)
 		k := o.gvkToDefinitionName.GetKind(kind)
 		resource, _ := o.generateEmptyResource(o.definitions.GetSchema(k)).(map[string]interface{})
-		if len(resource) == 0 {
+		if resource == nil || len(resource) == 0 {
 			log.Log.V(2).Info("unable to validate resource. OpenApi definition not found", "kind", kind)
 			return nil
 		}
@@ -304,6 +300,7 @@ func (c *Controller) updateKindToAPIVersions(apiResourceLists, preferredAPIResou
 	for key, value := range tempKindToAPIVersions {
 		c.kindToAPIVersions.Set(key, value)
 	}
+
 }
 
 func getSchemaDocument() (*openapiv2.Document, error) {
@@ -339,6 +336,7 @@ func (o *Controller) getCRDSchema(kind string) (proto.Schema, error) {
 }
 
 func (o *Controller) generateEmptyResource(kindSchema *openapiv2.Schema) interface{} {
+
 	types := kindSchema.GetType().GetValue()
 
 	if kindSchema.GetXRef() != "" {
@@ -368,7 +366,7 @@ func (o *Controller) generateEmptyResource(kindSchema *openapiv2.Schema) interfa
 		return getBoolValue(kindSchema)
 	}
 
-	log.Log.V(2).Info("unknown type", types[0])
+	log.Log.Info("unknown type", types[0])
 	return nil
 }
 
@@ -382,7 +380,7 @@ func getArrayValue(kindSchema *openapiv2.Schema, o *Controller) interface{} {
 }
 
 func getObjectValue(kindSchema *openapiv2.Schema, o *Controller) interface{} {
-	props := make(map[string]interface{})
+	var props = make(map[string]interface{})
 	properties := kindSchema.GetProperties().GetAdditionalProperties()
 	if len(properties) == 0 {
 		return props

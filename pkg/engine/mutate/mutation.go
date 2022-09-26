@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/engine/context"
 	"github.com/kyverno/kyverno/pkg/engine/mutate/patch"
 	"github.com/kyverno/kyverno/pkg/engine/response"
@@ -35,7 +35,7 @@ func newResponse(status response.RuleStatus, resource unstructured.Unstructured,
 	}
 }
 
-func Mutate(rule *kyvernov1.Rule, ctx context.Interface, resource unstructured.Unstructured, logger logr.Logger) *Response {
+func Mutate(rule *kyverno.Rule, ctx context.Interface, resource unstructured.Unstructured, logger logr.Logger) *Response {
 	updatedRule, err := variables.SubstituteAllInRule(logger, ctx, *rule)
 	if err != nil {
 		return newErrorResponse("variable substitution failed", err)
@@ -63,7 +63,7 @@ func Mutate(rule *kyvernov1.Rule, ctx context.Interface, resource unstructured.U
 	return newResponse(response.RuleStatusPass, patchedResource, resp.Patches, resp.Message)
 }
 
-func ForEach(name string, foreach kyvernov1.ForEachMutation, ctx context.Interface, resource unstructured.Unstructured, logger logr.Logger) *Response {
+func ForEach(name string, foreach kyverno.ForEachMutation, ctx context.Interface, resource unstructured.Unstructured, logger logr.Logger) *Response {
 	fe, err := substituteAllInForEach(foreach, ctx, logger)
 	if err != nil {
 		return newErrorResponse("variable substitution failed", err)
@@ -90,7 +90,7 @@ func ForEach(name string, foreach kyvernov1.ForEachMutation, ctx context.Interfa
 	return newResponse(response.RuleStatusPass, patchedResource, resp.Patches, resp.Message)
 }
 
-func substituteAllInForEach(fe kyvernov1.ForEachMutation, ctx context.Interface, logger logr.Logger) (*kyvernov1.ForEachMutation, error) {
+func substituteAllInForEach(fe kyverno.ForEachMutation, ctx context.Interface, logger logr.Logger) (*kyverno.ForEachMutation, error) {
 	jsonObj, err := utils.ToMap(fe)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func substituteAllInForEach(fe kyvernov1.ForEachMutation, ctx context.Interface,
 		return nil, err
 	}
 
-	var updatedForEach kyvernov1.ForEachMutation
+	var updatedForEach kyverno.ForEachMutation
 	if err := json.Unmarshal(bytes, &updatedForEach); err != nil {
 		return nil, err
 	}

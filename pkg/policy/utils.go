@@ -1,7 +1,7 @@
 package policy
 
 import (
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -16,7 +16,7 @@ func isRunningPod(obj unstructured.Unstructured) bool {
 }
 
 // check if all slice elements are same
-func isMatchResourcesAllValid(rule kyvernov1.Rule) bool {
+func isMatchResourcesAllValid(rule kyverno.Rule) bool {
 	var kindlist []string
 	for _, all := range rule.MatchResources.All {
 		kindlist = append(kindlist, all.Kinds...)
@@ -34,7 +34,7 @@ func isMatchResourcesAllValid(rule kyvernov1.Rule) bool {
 	return true
 }
 
-func fetchUniqueKinds(rule kyvernov1.Rule) []string {
+func fetchUniqueKinds(rule kyverno.Rule) []string {
 	var kindlist []string
 
 	kindlist = append(kindlist, rule.MatchResources.Kinds...)

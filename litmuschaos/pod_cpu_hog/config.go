@@ -7,10 +7,11 @@ type testData struct {
 
 // Pod CPU hog test
 var PodCPUHogTest = struct {
-	// TestName - Name of the Test
+	//TestName - Name of the Test
 	TestName string
 	TestData []testData
 }{
+
 	TestName: "test-litmus-chaos-experiment",
 	TestData: []testData{
 		{

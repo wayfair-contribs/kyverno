@@ -17,10 +17,13 @@ limitations under the License.
 package v1alpha2
 
 import (
-	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
+	report "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -52,23 +55,11 @@ type ReportChangeRequest struct {
 
 	// PolicyReportSummary provides a summary of results
 	// +optional
-	Summary policyreportv1alpha2.PolicyReportSummary `json:"summary,omitempty"`
+	Summary report.PolicyReportSummary `json:"summary,omitempty"`
 
 	// PolicyReportResult provides result details
 	// +optional
-	Results []policyreportv1alpha2.PolicyReportResult `json:"results,omitempty"`
-}
-
-func (r *ReportChangeRequest) GetResults() []policyreportv1alpha2.PolicyReportResult {
-	return r.Results
-}
-
-func (r *ReportChangeRequest) SetResults(results []policyreportv1alpha2.PolicyReportResult) {
-	r.Results = results
-}
-
-func (r *ReportChangeRequest) SetSummary(summary policyreportv1alpha2.PolicyReportSummary) {
-	r.Summary = summary
+	Results []report.PolicyReportResult `json:"results,omitempty"`
 }
 
 // +kubebuilder:object:root=true

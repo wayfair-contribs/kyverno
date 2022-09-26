@@ -15,29 +15,30 @@ import (
 	utilscommon "github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/utils/common"
 	"github.com/kyverno/kyverno/pkg/autogen"
 	common "github.com/kyverno/kyverno/pkg/background/common"
-	"github.com/kyverno/kyverno/pkg/client/clientset/versioned"
+	kyvernoclient "github.com/kyverno/kyverno/pkg/client/clientset/versioned"
 	"github.com/kyverno/kyverno/pkg/client/clientset/versioned/scheme"
-	kyvernov1informers "github.com/kyverno/kyverno/pkg/client/informers/externalversions/kyverno/v1"
-	kyvernov1beta1informers "github.com/kyverno/kyverno/pkg/client/informers/externalversions/kyverno/v1beta1"
-	kyvernov1listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1"
+	kyvernoinformer "github.com/kyverno/kyverno/pkg/client/informers/externalversions/kyverno/v1"
+	urkyvernoinformer "github.com/kyverno/kyverno/pkg/client/informers/externalversions/kyverno/v1beta1"
+	kyvernolister "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1"
 	kyvernov1beta1listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1beta1"
-	"github.com/kyverno/kyverno/pkg/clients/dclient"
+	urkyvernolister "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1beta1"
 	"github.com/kyverno/kyverno/pkg/config"
+	client "github.com/kyverno/kyverno/pkg/dclient"
 	"github.com/kyverno/kyverno/pkg/event"
 	"github.com/kyverno/kyverno/pkg/metrics"
 	"github.com/kyverno/kyverno/pkg/policyreport"
 	"github.com/kyverno/kyverno/pkg/toggle"
 	"github.com/kyverno/kyverno/pkg/utils"
-	kubeutils "github.com/kyverno/kyverno/pkg/utils/kube"
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	corev1informers "k8s.io/client-go/informers/core/v1"
+	informers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/kubernetes"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	corev1listers "k8s.io/client-go/listers/core/v1"
+	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -55,10 +56,10 @@ const (
 // PolicyController is responsible for synchronizing Policy objects stored
 // in the system with the corresponding policy violations
 type PolicyController struct {
-	client        dclient.Interface
-	kyvernoClient versioned.Interface
-	pInformer     kyvernov1informers.ClusterPolicyInformer
-	npInformer    kyvernov1informers.PolicyInformer
+	client        client.Interface
+	kyvernoClient kyvernoclient.Interface
+	pInformer     kyvernoinformer.ClusterPolicyInformer
+	npInformer    kyvernoinformer.PolicyInformer
 
 	eventGen      event.Interface
 	eventRecorder record.EventRecorder
@@ -67,16 +68,16 @@ type PolicyController struct {
 	queue workqueue.RateLimitingInterface
 
 	// pLister can list/get policy from the shared informer's store
-	pLister kyvernov1listers.ClusterPolicyLister
+	pLister kyvernolister.ClusterPolicyLister
 
 	// npLister can list/get namespace policy from the shared informer's store
-	npLister kyvernov1listers.PolicyLister
+	npLister kyvernolister.PolicyLister
 
 	// urLister can list/get update request from the shared informer's store
-	urLister kyvernov1beta1listers.UpdateRequestLister
+	urLister urkyvernolister.UpdateRequestLister
 
 	// nsLister can list/get namespaces from the shared informer's store
-	nsLister corev1listers.NamespaceLister
+	nsLister listerv1.NamespaceLister
 
 	informersSynced []cache.InformerSynced
 
@@ -95,25 +96,27 @@ type PolicyController struct {
 
 	log logr.Logger
 
-	metricsConfig *metrics.MetricsConfig
+	promConfig *metrics.PromConfig
 }
 
 // NewPolicyController create a new PolicyController
 func NewPolicyController(
-	kyvernoClient versioned.Interface,
-	client dclient.Interface,
-	pInformer kyvernov1informers.ClusterPolicyInformer,
-	npInformer kyvernov1informers.PolicyInformer,
-	urInformer kyvernov1beta1informers.UpdateRequestInformer,
+	kubeClient kubernetes.Interface,
+	kyvernoClient kyvernoclient.Interface,
+	client client.Interface,
+	pInformer kyvernoinformer.ClusterPolicyInformer,
+	npInformer kyvernoinformer.PolicyInformer,
+	urInformer urkyvernoinformer.UpdateRequestInformer,
 	configHandler config.Configuration,
 	eventGen event.Interface,
 	prGenerator policyreport.GeneratorInterface,
 	policyReportEraser policyreport.PolicyReportEraser,
-	namespaces corev1informers.NamespaceInformer,
+	namespaces informers.NamespaceInformer,
 	log logr.Logger,
 	reconcilePeriod time.Duration,
-	metricsConfig *metrics.MetricsConfig,
+	promConfig *metrics.PromConfig,
 ) (*PolicyController, error) {
+
 	// Event broad caster
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(log.V(5).Info)
@@ -129,22 +132,24 @@ func NewPolicyController(
 		pInformer:          pInformer,
 		npInformer:         npInformer,
 		eventGen:           eventGen,
-		eventRecorder:      eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "policy_controller"}),
+		eventRecorder:      eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "policy_controller"}),
 		queue:              workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "policy"),
 		configHandler:      configHandler,
 		prGenerator:        prGenerator,
 		policyReportEraser: policyReportEraser,
 		reconcilePeriod:    reconcilePeriod,
-		metricsConfig:      metricsConfig,
+		promConfig:         promConfig,
 		log:                log,
 	}
 
 	pc.pLister = pInformer.Lister()
 	pc.npLister = npInformer.Lister()
+
 	pc.nsLister = namespaces.Lister()
 	pc.urLister = urInformer.Lister()
 
 	pc.informersSynced = []cache.InformerSynced{pInformer.Informer().HasSynced, npInformer.Informer().HasSynced, urInformer.Informer().HasSynced, namespaces.Informer().HasSynced}
+
 	// resource manager
 	// rebuild after 300 seconds/ 5 mins
 	pc.rm = NewResourceManager(30)
@@ -178,7 +183,7 @@ func (pc *PolicyController) addPolicy(obj interface{}) {
 	// register kyverno_policy_changes_total metric concurrently
 	go pc.registerPolicyChangesMetricAddPolicy(logger, p)
 
-	if !toggle.AutogenInternals.Enabled() {
+	if !toggle.AutogenInternals() {
 		if p.Spec.Background == nil || p.Spec.ValidationFailureAction == "" || missingAutoGenRules(p, logger) {
 			pol, _ := utilscommon.MutatePolicy(p, logger)
 			_, err := pc.kyvernoClient.KyvernoV1().ClusterPolicies().Update(context.TODO(), pol.(*kyvernov1.ClusterPolicy), metav1.UpdateOptions{})
@@ -206,7 +211,7 @@ func (pc *PolicyController) updatePolicy(old, cur interface{}) {
 	// register kyverno_policy_changes_total metric concurrently
 	go pc.registerPolicyChangesMetricUpdatePolicy(logger, oldP, curP)
 
-	if !toggle.AutogenInternals.Enabled() {
+	if !toggle.AutogenInternals() {
 		if curP.Spec.Background == nil || curP.Spec.ValidationFailureAction == "" || missingAutoGenRules(curP, logger) {
 			pol, _ := utilscommon.MutatePolicy(curP, logger)
 			_, err := pc.kyvernoClient.KyvernoV1().ClusterPolicies().Update(context.TODO(), pol.(*kyvernov1.ClusterPolicy), metav1.UpdateOptions{})
@@ -232,10 +237,18 @@ func (pc *PolicyController) updatePolicy(old, cur interface{}) {
 
 func (pc *PolicyController) deletePolicy(obj interface{}) {
 	logger := pc.log
-	p, ok := kubeutils.GetObjectWithTombstone(obj).(*kyvernov1.ClusterPolicy)
+	p, ok := obj.(*kyvernov1.ClusterPolicy)
 	if !ok {
-		logger.Info("Failed to get deleted object", "obj", obj)
-		return
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			logger.Info("couldn't get object from tombstone", "obj", obj)
+			return
+		}
+		p, ok = tombstone.Obj.(*kyvernov1.ClusterPolicy)
+		if !ok {
+			logger.Info("tombstone container object that is not a policy", "obj", obj)
+			return
+		}
 	}
 
 	// register kyverno_policy_rule_info_total metric concurrently
@@ -269,7 +282,7 @@ func (pc *PolicyController) addNsPolicy(obj interface{}) {
 
 	logger.Info("policy created", "uid", p.UID, "kind", "Policy", "name", p.Name, "namespaces", p.Namespace)
 
-	if !toggle.AutogenInternals.Enabled() {
+	if !toggle.AutogenInternals() {
 		spec := p.GetSpec()
 		if spec.Background == nil || spec.ValidationFailureAction == "" || missingAutoGenRules(p, logger) {
 			nsPol, _ := utilscommon.MutatePolicy(p, logger)
@@ -297,7 +310,7 @@ func (pc *PolicyController) updateNsPolicy(old, cur interface{}) {
 	// register kyverno_policy_changes_total metric concurrently
 	go pc.registerPolicyChangesMetricUpdatePolicy(logger, oldP, curP)
 
-	if !toggle.AutogenInternals.Enabled() {
+	if !toggle.AutogenInternals() {
 		if curP.Spec.Background == nil || curP.Spec.ValidationFailureAction == "" || missingAutoGenRules(curP, logger) {
 			nsPol, _ := utilscommon.MutatePolicy(curP, logger)
 			_, err := pc.kyvernoClient.KyvernoV1().Policies(curP.GetNamespace()).Update(context.TODO(), nsPol.(*kyvernov1.Policy), metav1.UpdateOptions{})
@@ -323,10 +336,18 @@ func (pc *PolicyController) updateNsPolicy(old, cur interface{}) {
 
 func (pc *PolicyController) deleteNsPolicy(obj interface{}) {
 	logger := pc.log
-	p, ok := kubeutils.GetObjectWithTombstone(obj).(*kyvernov1.Policy)
+	p, ok := obj.(*kyvernov1.Policy)
 	if !ok {
-		logger.Info("Failed to get deleted object", "obj", obj)
-		return
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			logger.Info("couldn't get object from tombstone", "obj", obj)
+			return
+		}
+		p, ok = tombstone.Obj.(*kyvernov1.Policy)
+		if !ok {
+			logger.Info("tombstone container object that is not a policy", "obj", obj)
+			return
+		}
 	}
 
 	// register kyverno_policy_rule_info_total metric concurrently
@@ -493,7 +514,7 @@ func (pc *PolicyController) getPolicy(key string) (kyvernov1.PolicyInterface, er
 	return pc.npLister.Policies(namespace).Get(key)
 }
 
-func generateTriggers(client dclient.Interface, rule kyvernov1.Rule, log logr.Logger) []*unstructured.Unstructured {
+func generateTriggers(client client.Interface, rule kyvernov1.Rule, log logr.Logger) []*unstructured.Unstructured {
 	list := &unstructured.UnstructuredList{}
 
 	kinds := fetchUniqueKinds(rule)
@@ -502,14 +523,13 @@ func generateTriggers(client dclient.Interface, rule kyvernov1.Rule, log logr.Lo
 		mlist, err := client.ListResource("", kind, "", rule.MatchResources.Selector)
 		if err != nil {
 			log.Error(err, "failed to list matched resource")
-			continue
 		}
 		list.Items = append(list.Items, mlist.Items...)
 	}
 	return convertlist(list.Items)
 }
 
-func updateUR(kyvernoClient versioned.Interface, urLister kyvernov1beta1listers.UpdateRequestNamespaceLister, policyKey string, urList []*kyvernov1beta1.UpdateRequest, logger logr.Logger) {
+func updateUR(kyvernoClient kyvernoclient.Interface, urLister kyvernov1beta1listers.UpdateRequestNamespaceLister, policyKey string, urList []*kyvernov1beta1.UpdateRequest, logger logr.Logger) {
 	for _, ur := range urList {
 		if policyKey == ur.Spec.Policy {
 			_, err := common.Update(kyvernoClient, urLister, ur.GetName(), func(ur *kyvernov1beta1.UpdateRequest) {

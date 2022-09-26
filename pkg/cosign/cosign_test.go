@@ -71,13 +71,14 @@ func TestCosignKeyless(t *testing.T) {
 	}
 
 	_, err := verifySignature(opts)
-	assert.Error(t, err, "subject mismatch: expected jim@nirmata.com, received jim")
+	assert.Error(t, err, "subject mismatch: expected jim@nirmata.com, got jim")
 
 	opts.Subject = "jim@nirmata.com"
 	_, err = verifySignature(opts)
-	assert.Error(t, err, "issuer mismatch: expected https://github.com/, received https://github.com/login/oauth")
+	assert.Error(t, err, "issuer mismatch: expected https://github.com/login/oauth, got https://github.com/")
 
 	opts.Issuer = "https://github.com/login/oauth"
 	_, err = verifySignature(opts)
 	assert.NilError(t, err)
+
 }

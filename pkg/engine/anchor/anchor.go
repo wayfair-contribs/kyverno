@@ -58,6 +58,7 @@ func (nh NegationHandler) Handle(handler resourceElementHandler, resourceMap map
 		// no need to process elements in value as key cannot be present in resource
 		ac.AnchorError = NewNegationAnchorError(fmt.Sprintf("%s is not allowed", currentPath))
 		return currentPath, ac.AnchorError.Error()
+
 	}
 	// key is not defined in the resource
 	return "", nil
@@ -156,10 +157,9 @@ func (ch ConditionAnchorHandler) Handle(handler resourceElementHandler, resource
 			return returnPath, ac.AnchorError.Error()
 		}
 		return "", nil
-	} else {
-		msg := "conditional anchor key doesn't exist in the resource"
-		return currentPath, NewConditionalAnchorError(msg).Error()
+
 	}
+	return "", nil
 }
 
 // NewGlobalAnchorHandler returns an instance of condition acnhor handler

@@ -3,7 +3,7 @@ package engine
 import (
 	"time"
 
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/autogen"
 	"github.com/kyverno/kyverno/pkg/engine/common"
 	"github.com/kyverno/kyverno/pkg/engine/response"
@@ -13,8 +13,7 @@ import (
 
 // ApplyBackgroundChecks checks for validity of generate and mutateExisting rules on the resource
 // 1. validate variables to be substitute in the general ruleInfo (match,exclude,condition)
-//   - the caller has to check the ruleResponse to determine whether the path exist
-//
+//    - the caller has to check the ruleResponse to determine whether the path exist
 // 2. returns the list of rules that are applicable on this policy and resource, if 1 succeed
 func ApplyBackgroundChecks(policyContext *PolicyContext) (resp *response.EngineResponse) {
 	policyStartTime := time.Now()
@@ -49,20 +48,16 @@ func filterRules(policyContext *PolicyContext, startTime time.Time) *response.En
 		return resp
 	}
 
-	applyRules := policyContext.Policy.GetSpec().GetApplyRules()
 	for _, rule := range autogen.ComputeRules(policyContext.Policy) {
 		if ruleResp := filterRule(rule, policyContext); ruleResp != nil {
 			resp.PolicyResponse.Rules = append(resp.PolicyResponse.Rules, *ruleResp)
-			if applyRules == kyvernov1.ApplyOne && ruleResp.Status != response.RuleStatusSkip {
-				break
-			}
 		}
 	}
 
 	return resp
 }
 
-func filterRule(rule kyvernov1.Rule, policyContext *PolicyContext) *response.RuleResponse {
+func filterRule(rule kyverno.Rule, policyContext *PolicyContext) *response.RuleResponse {
 	if !rule.HasGenerate() && !rule.IsMutateExisting() {
 		return nil
 	}
@@ -87,6 +82,7 @@ func filterRule(rule kyvernov1.Rule, policyContext *PolicyContext) *response.Rul
 		"kind", newResource.GetKind(), "namespace", newResource.GetNamespace(), "name", newResource.GetName())
 
 	if err = MatchesResourceDescription(newResource, rule, admissionInfo, excludeGroupRole, namespaceLabels, ""); err != nil {
+
 		if ruleType == response.Generation {
 			// if the oldResource matched, return "false" to delete GR for it
 			if err = MatchesResourceDescription(oldResource, rule, admissionInfo, excludeGroupRole, namespaceLabels, ""); err == nil {
@@ -101,7 +97,7 @@ func filterRule(rule kyvernov1.Rule, policyContext *PolicyContext) *response.Rul
 				}
 			}
 		}
-		logger.V(4).Info("rule not matched", "reason", err.Error())
+
 		return nil
 	}
 

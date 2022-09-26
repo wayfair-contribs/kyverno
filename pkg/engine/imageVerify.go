@@ -3,13 +3,17 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"reflect"
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/go-logr/logr"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/kyverno/go-wildcard"
+	v1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/autogen"
 	"github.com/kyverno/kyverno/pkg/cosign"
 	"github.com/kyverno/kyverno/pkg/engine/context"
@@ -18,10 +22,7 @@ import (
 	"github.com/kyverno/kyverno/pkg/engine/variables"
 	"github.com/kyverno/kyverno/pkg/registryclient"
 	apiutils "github.com/kyverno/kyverno/pkg/utils/api"
-	"github.com/kyverno/kyverno/pkg/utils/wildcard"
 	"github.com/pkg/errors"
-	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -46,14 +47,15 @@ func VerifyAndPatchImages(policyContext *PolicyContext) (*response.EngineRespons
 	defer policyContext.JSONContext.Restore()
 
 	// update image registry secrets
-	if err := registryclient.DefaultClient.RefreshKeychainPullSecrets(); err != nil {
-		logger.Error(err, "failed to update image pull secrets")
+	if len(registryclient.Secrets) > 0 {
+		logger.V(4).Info("updating registry credentials", "secrets", registryclient.Secrets)
+		if err := registryclient.UpdateKeychain(); err != nil {
+			logger.Error(err, "failed to update image pull secrets")
+		}
 	}
 
 	ivm := &ImageVerificationMetadata{}
 	rules := autogen.ComputeRules(policyContext.Policy)
-	applyRules := policy.GetSpec().GetApplyRules()
-
 	for i := range rules {
 		rule := &rules[i]
 		if len(rule.VerifyImages) == 0 {
@@ -64,9 +66,8 @@ func VerifyAndPatchImages(policyContext *PolicyContext) (*response.EngineRespons
 			continue
 		}
 
-		logger.V(3).Info("processing image verification rule", "ruleSelector", applyRules)
-
 		policyContext.JSONContext.Restore()
+
 		if err := LoadContext(logger, rule.Context, policyContext, rule.Name); err != nil {
 			appendError(resp, rule, fmt.Sprintf("failed to load context: %s", err.Error()), response.RuleStatusError)
 			continue
@@ -102,22 +103,19 @@ func VerifyAndPatchImages(policyContext *PolicyContext) (*response.EngineRespons
 		for _, imageVerify := range ruleCopy.VerifyImages {
 			iv.verify(imageVerify, ruleImages)
 		}
-
-		if applyRules == kyvernov1.ApplyOne && resp.PolicyResponse.RulesAppliedCount > 0 {
-			break
-		}
 	}
 
 	return resp, ivm
 }
 
-func appendError(resp *response.EngineResponse, rule *kyvernov1.Rule, msg string, status response.RuleStatus) {
+func appendError(resp *response.EngineResponse, rule *v1.Rule, msg string, status response.RuleStatus) {
 	rr := ruleResponse(*rule, response.ImageVerify, msg, status, nil)
 	resp.PolicyResponse.Rules = append(resp.PolicyResponse.Rules, *rr)
 	incrementErrorCount(resp)
 }
 
-func substituteVariables(rule *kyvernov1.Rule, ctx context.EvalInterface, logger logr.Logger) (*kyvernov1.Rule, error) {
+func substituteVariables(rule *v1.Rule, ctx context.EvalInterface, logger logr.Logger) (*v1.Rule, error) {
+
 	// remove attestations as variables are not substituted in them
 	ruleCopy := *rule.DeepCopy()
 	for i := range ruleCopy.VerifyImages {
@@ -141,14 +139,14 @@ func substituteVariables(rule *kyvernov1.Rule, ctx context.EvalInterface, logger
 type imageVerifier struct {
 	logger        logr.Logger
 	policyContext *PolicyContext
-	rule          *kyvernov1.Rule
+	rule          *v1.Rule
 	resp          *response.EngineResponse
 	ivm           *ImageVerificationMetadata
 }
 
 // verify applies policy rules to each matching image. The policy rule results and annotation patches are
 // added to tme imageVerifier `resp` and `ivm` fields.
-func (iv *imageVerifier) verify(imageVerify kyvernov1.ImageVerification, images map[string]map[string]apiutils.ImageInfo) {
+func (iv *imageVerifier) verify(imageVerify v1.ImageVerification, images map[string]map[string]apiutils.ImageInfo) {
 	// for backward compatibility
 	imageVerify = *imageVerify.Convert()
 
@@ -197,6 +195,7 @@ func (iv *imageVerifier) verify(imageVerify kyvernov1.ImageVerification, images 
 					ruleResp.Patches = append(ruleResp.Patches, patch)
 					imageInfo.Digest = retrievedDigest
 					image = imageInfo.String()
+					digest = retrievedDigest
 				}
 			}
 
@@ -219,11 +218,11 @@ func (iv *imageVerifier) handleMutateDigest(digest string, imageInfo apiutils.Im
 	}
 
 	if digest == "" {
-		desc, err := registryclient.DefaultClient.FetchImageDescriptor(imageInfo.String())
+		var err error
+		digest, err = fetchImageDigest(imageInfo.String())
 		if err != nil {
 			return nil, "", err
 		}
-		digest = desc.Digest.String()
 	}
 
 	patch, err := makeAddDigestPatch(imageInfo, digest)
@@ -253,6 +252,20 @@ func hasImageVerifiedAnnotationChanged(ctx *PolicyContext, log logr.Logger) bool
 	return result
 }
 
+func fetchImageDigest(ref string) (string, error) {
+	parsedRef, err := name.ParseReference(ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse image reference: %s, error: %v", ref, err)
+	}
+
+	desc, err := remote.Get(parsedRef, remote.WithAuthFromKeychain(registryclient.DefaultKeychain))
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch image reference: %s, error: %v", ref, err)
+	}
+
+	return desc.Digest.String(), nil
+}
+
 func imageMatches(image string, imagePatterns []string) bool {
 	for _, imagePattern := range imagePatterns {
 		if wildcard.Match(imagePattern, image) {
@@ -263,7 +276,7 @@ func imageMatches(image string, imagePatterns []string) bool {
 	return false
 }
 
-func (iv *imageVerifier) verifyImage(imageVerify kyvernov1.ImageVerification, imageInfo apiutils.ImageInfo) (*response.RuleResponse, string) {
+func (iv *imageVerifier) verifyImage(imageVerify v1.ImageVerification, imageInfo apiutils.ImageInfo) (*response.RuleResponse, string) {
 	if len(imageVerify.Attestors) <= 0 {
 		return nil, ""
 	}
@@ -271,12 +284,6 @@ func (iv *imageVerifier) verifyImage(imageVerify kyvernov1.ImageVerification, im
 	image := imageInfo.String()
 	iv.logger.V(2).Info("verifying image signatures", "image", image,
 		"attestors", len(imageVerify.Attestors), "attestations", len(imageVerify.Attestations))
-
-	if err := iv.policyContext.JSONContext.AddImageInfo(imageInfo); err != nil {
-		iv.logger.Error(err, "failed to add image to context")
-		msg := fmt.Sprintf("failed to add image to context %s: %s", image, err.Error())
-		return ruleResponse(*iv.rule, response.ImageVerify, msg, response.RuleStatusError, nil), ""
-	}
 
 	var cosignResponse *cosign.Response
 	for i, attestorSet := range imageVerify.Attestors {
@@ -286,13 +293,6 @@ func (iv *imageVerifier) verifyImage(imageVerify kyvernov1.ImageVerification, im
 		if err != nil {
 			iv.logger.Error(err, "failed to verify signature")
 			msg := fmt.Sprintf("failed to verify signature for %s: %s", image, err.Error())
-
-			// handle registry network errors as a rule error (instead of a policy failure)
-			var netErr *net.OpError
-			if errors.As(err, &netErr) {
-				return ruleResponse(*iv.rule, response.ImageVerify, msg, response.RuleStatusError, nil), ""
-			}
-
 			return ruleResponse(*iv.rule, response.ImageVerify, msg, response.RuleStatusFail, nil), ""
 		}
 	}
@@ -305,9 +305,9 @@ func (iv *imageVerifier) verifyImage(imageVerify kyvernov1.ImageVerification, im
 	return ruleResponse(*iv.rule, response.ImageVerify, msg, response.RuleStatusPass, nil), cosignResponse.Digest
 }
 
-func (iv *imageVerifier) verifyAttestorSet(attestorSet kyvernov1.AttestorSet, imageVerify kyvernov1.ImageVerification,
-	imageInfo apiutils.ImageInfo, path string,
-) (*cosign.Response, error) {
+func (iv *imageVerifier) verifyAttestorSet(attestorSet v1.AttestorSet, imageVerify v1.ImageVerification,
+	imageInfo apiutils.ImageInfo, path string) (*cosign.Response, error) {
+
 	var errorList []error
 	verifiedCount := 0
 	attestorSet = expandStaticKeys(attestorSet)
@@ -320,7 +320,7 @@ func (iv *imageVerifier) verifyAttestorSet(attestorSet kyvernov1.AttestorSet, im
 		attestorPath := fmt.Sprintf("%s.entries[%d]", path, i)
 
 		if a.Attestor != nil {
-			nestedAttestorSet, err := kyvernov1.AttestorSetUnmarshal(a.Attestor)
+			nestedAttestorSet, err := v1.AttestorSetUnmarshal(a.Attestor)
 			if err != nil {
 				entryError = errors.Wrapf(err, "failed to unmarshal nested attestor %s", attestorPath)
 			} else {
@@ -330,12 +330,12 @@ func (iv *imageVerifier) verifyAttestorSet(attestorSet kyvernov1.AttestorSet, im
 		} else {
 			opts, subPath := iv.buildOptionsAndPath(a, imageVerify, image)
 			cosignResp, entryError = cosign.Verify(*opts)
-			if entryError == nil && opts.FetchAttestations {
+			if opts.FetchAttestations && entryError == nil {
 				entryError = iv.verifyAttestations(cosignResp.Statements, imageVerify, imageInfo)
 			}
 
 			if entryError != nil {
-				entryError = errors.Wrapf(entryError, attestorPath+subPath)
+				entryError = fmt.Errorf("%s: %s", attestorPath+subPath, entryError.Error())
 			}
 		}
 
@@ -351,12 +351,12 @@ func (iv *imageVerifier) verifyAttestorSet(attestorSet kyvernov1.AttestorSet, im
 	}
 
 	iv.logger.Info("image verification failed", "verifiedCount", verifiedCount, "requiredCount", requiredCount, "errors", errorList)
-	err := multierr.Combine(errorList...)
+	err := engineUtils.CombineErrors(errorList)
 	return nil, err
 }
 
-func expandStaticKeys(attestorSet kyvernov1.AttestorSet) kyvernov1.AttestorSet {
-	var entries []kyvernov1.Attestor
+func expandStaticKeys(attestorSet v1.AttestorSet) v1.AttestorSet {
+	var entries []v1.Attestor
 	for _, e := range attestorSet.Entries {
 		if e.Keys != nil {
 			keys := splitPEM(e.Keys.PublicKeys)
@@ -370,7 +370,7 @@ func expandStaticKeys(attestorSet kyvernov1.AttestorSet) kyvernov1.AttestorSet {
 		entries = append(entries, e)
 	}
 
-	return kyvernov1.AttestorSet{
+	return v1.AttestorSet{
 		Count:   attestorSet.Count,
 		Entries: entries,
 	}
@@ -385,11 +385,11 @@ func splitPEM(pem string) []string {
 	return keys[0 : len(keys)-1]
 }
 
-func createStaticKeyAttestors(keys []string) []kyvernov1.Attestor {
-	var attestors []kyvernov1.Attestor
+func createStaticKeyAttestors(keys []string) []v1.Attestor {
+	var attestors []v1.Attestor
 	for _, k := range keys {
-		a := kyvernov1.Attestor{
-			Keys: &kyvernov1.StaticKeyAttestor{
+		a := v1.Attestor{
+			Keys: &v1.StaticKeyAttestor{
 				PublicKeys: k,
 			},
 		}
@@ -399,7 +399,7 @@ func createStaticKeyAttestors(keys []string) []kyvernov1.Attestor {
 	return attestors
 }
 
-func getRequiredCount(as kyvernov1.AttestorSet) int {
+func getRequiredCount(as v1.AttestorSet) int {
 	if as.Count == nil || *as.Count == 0 {
 		return len(as.Entries)
 	}
@@ -407,7 +407,7 @@ func getRequiredCount(as kyvernov1.AttestorSet) int {
 	return *as.Count
 }
 
-func (iv *imageVerifier) buildOptionsAndPath(attestor kyvernov1.Attestor, imageVerify kyvernov1.ImageVerification, image string) (*cosign.Options, string) {
+func (iv *imageVerifier) buildOptionsAndPath(attestor v1.Attestor, imageVerify v1.ImageVerification, image string) (*cosign.Options, string) {
 	path := ""
 	opts := &cosign.Options{
 		ImageRef:    image,
@@ -429,6 +429,7 @@ func (iv *imageVerifier) buildOptionsAndPath(attestor kyvernov1.Attestor, imageV
 		if attestor.Keys.Rekor != nil {
 			opts.RekorURL = attestor.Keys.Rekor.URL
 		}
+
 	} else if attestor.Certificates != nil {
 		path = path + ".certificates"
 		opts.Cert = attestor.Certificates.Certificate
@@ -436,6 +437,7 @@ func (iv *imageVerifier) buildOptionsAndPath(attestor kyvernov1.Attestor, imageV
 		if attestor.Certificates.Rekor != nil {
 			opts.RekorURL = attestor.Certificates.Rekor.URL
 		}
+
 	} else if attestor.Keyless != nil {
 		path = path + ".keyless"
 		if attestor.Keyless.Rekor != nil {
@@ -460,14 +462,14 @@ func (iv *imageVerifier) buildOptionsAndPath(attestor kyvernov1.Attestor, imageV
 }
 
 func makeAddDigestPatch(imageInfo apiutils.ImageInfo, digest string) ([]byte, error) {
-	patch := make(map[string]interface{})
+	var patch = make(map[string]interface{})
 	patch["op"] = "replace"
 	patch["path"] = imageInfo.Pointer
 	patch["value"] = imageInfo.String() + "@" + digest
 	return json.Marshal(patch)
 }
 
-func (iv *imageVerifier) verifyAttestations(statements []map[string]interface{}, imageVerify kyvernov1.ImageVerification, imageInfo apiutils.ImageInfo) error {
+func (iv *imageVerifier) verifyAttestations(statements []map[string]interface{}, imageVerify v1.ImageVerification, imageInfo apiutils.ImageInfo) error {
 	image := imageInfo.String()
 	statementsByPredicate, types := buildStatementMap(statements)
 	iv.logger.V(4).Info("checking attestations", "predicates", types, "image", image)
@@ -475,14 +477,14 @@ func (iv *imageVerifier) verifyAttestations(statements []map[string]interface{},
 	for _, ac := range imageVerify.Attestations {
 		statements := statementsByPredicate[ac.PredicateType]
 		if statements == nil {
-			iv.logger.Info("attestation predicate type not found", "type", ac.PredicateType, "predicates", types, "image", imageInfo.String())
+			iv.logger.Info("attestation predicate type %s not found", "predicates", types, "image", imageInfo.String())
 			return fmt.Errorf("predicate type %s not found", ac.PredicateType)
 		}
 
-		iv.logger.Info("checking attestation", "predicates", types, "image", imageInfo.String())
+		iv.logger.Info("checking attestation predicate type %s", "predicates", types, "image", imageInfo.String())
 
 		for _, s := range statements {
-			val, err := iv.checkAttestations(ac, s)
+			val, err := iv.checkAttestations(ac, s, imageInfo)
 			if err != nil {
 				return errors.Wrap(err, "failed to check attestations")
 			}
@@ -493,7 +495,7 @@ func (iv *imageVerifier) verifyAttestations(statements []map[string]interface{},
 		}
 	}
 
-	iv.logger.V(3).Info("attestation checks passed", "image", imageInfo.String())
+	iv.logger.V(3).Info("attestation checks passed for %s", imageInfo.String())
 	return nil
 }
 
@@ -514,7 +516,7 @@ func buildStatementMap(statements []map[string]interface{}) (map[string][]map[st
 	return results, predicateTypes
 }
 
-func (iv *imageVerifier) checkAttestations(a kyvernov1.Attestation, s map[string]interface{}) (bool, error) {
+func (iv *imageVerifier) checkAttestations(a v1.Attestation, s map[string]interface{}, img apiutils.ImageInfo) (bool, error) {
 	if len(a.Conditions) == 0 {
 		return true, nil
 	}
@@ -522,15 +524,16 @@ func (iv *imageVerifier) checkAttestations(a kyvernov1.Attestation, s map[string
 	iv.policyContext.JSONContext.Checkpoint()
 	defer iv.policyContext.JSONContext.Restore()
 
-	return evaluateConditions(a.Conditions, iv.policyContext.JSONContext, s, iv.logger)
+	return evaluateConditions(a.Conditions, iv.policyContext.JSONContext, s, img, iv.logger)
 }
 
 func evaluateConditions(
-	conditions []kyvernov1.AnyAllConditions,
+	conditions []v1.AnyAllConditions,
 	ctx context.Interface,
 	s map[string]interface{},
-	log logr.Logger,
-) (bool, error) {
+	img apiutils.ImageInfo,
+	log logr.Logger) (bool, error) {
+
 	predicate, ok := s["predicate"].(map[string]interface{})
 	if !ok {
 		return false, fmt.Errorf("failed to extract predicate from statement: %v", s)
@@ -538,6 +541,10 @@ func evaluateConditions(
 
 	if err := context.AddJSONObject(ctx, predicate); err != nil {
 		return false, errors.Wrapf(err, fmt.Sprintf("failed to add Statement to the context %v", s))
+	}
+
+	if err := ctx.AddImageInfo(img); err != nil {
+		return false, errors.Wrapf(err, fmt.Sprintf("failed to add image to the context %v", s))
 	}
 
 	c, err := variables.SubstituteAllInConditions(log, ctx, conditions)

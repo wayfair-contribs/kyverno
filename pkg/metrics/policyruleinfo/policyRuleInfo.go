@@ -3,14 +3,15 @@ package policyruleinfo
 import (
 	"fmt"
 
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/autogen"
 	"github.com/kyverno/kyverno/pkg/metrics"
 	"github.com/kyverno/kyverno/pkg/utils"
+	prom "github.com/prometheus/client_golang/prometheus"
 )
 
 func registerPolicyRuleInfoMetric(
-	m *metrics.MetricsConfig,
+	pc *metrics.PromConfig,
 	policyValidationMode metrics.PolicyValidationMode,
 	policyType metrics.PolicyType,
 	policyBackgroundMode metrics.PolicyBackgroundMode,
@@ -28,13 +29,13 @@ func registerPolicyRuleInfoMetric(
 	default:
 		return fmt.Errorf("unknown metric change type found:  %s", metricChangeType)
 	}
-	includeNamespaces, excludeNamespaces := m.Config.GetIncludeNamespaces(), m.Config.GetExcludeNamespaces()
+	includeNamespaces, excludeNamespaces := pc.Config.GetIncludeNamespaces(), pc.Config.GetExcludeNamespaces()
 	if (policyNamespace != "" && policyNamespace != "-") && utils.ContainsString(excludeNamespaces, policyNamespace) {
-		m.Log.V(2).Info(fmt.Sprintf("Skipping the registration of kyverno_policy_rule_info_total metric as the operation belongs to the namespace '%s' which is one of 'namespaces.exclude' %+v in values.yaml", policyNamespace, excludeNamespaces))
+		metrics.Logger().Info(fmt.Sprintf("Skipping the registration of kyverno_policy_rule_info_total metric as the operation belongs to the namespace '%s' which is one of 'namespaces.exclude' %+v in values.yaml", policyNamespace, excludeNamespaces))
 		return nil
 	}
 	if (policyNamespace != "" && policyNamespace != "-") && len(includeNamespaces) > 0 && !utils.ContainsString(includeNamespaces, policyNamespace) {
-		m.Log.V(2).Info(fmt.Sprintf("Skipping the registration of kyverno_policy_rule_info_total metric as the operation belongs to the namespace '%s' which is not one of 'namespaces.include' %+v in values.yaml", policyNamespace, includeNamespaces))
+		metrics.Logger().Info(fmt.Sprintf("Skipping the registration of kyverno_policy_rule_info_total metric as the operation belongs to the namespace '%s' which is not one of 'namespaces.include' %+v in values.yaml", policyNamespace, includeNamespaces))
 		return nil
 	}
 	if policyType == metrics.Cluster {
@@ -44,12 +45,20 @@ func registerPolicyRuleInfoMetric(
 	if ready {
 		status = "true"
 	}
-	m.RecordPolicyRuleInfo(policyValidationMode, policyType, policyBackgroundMode, policyNamespace, policyName, ruleName, ruleType, status, metricValue)
-
+	pc.Metrics.PolicyRuleInfo.With(prom.Labels{
+		"policy_validation_mode": string(policyValidationMode),
+		"policy_type":            string(policyType),
+		"policy_background_mode": string(policyBackgroundMode),
+		"policy_namespace":       policyNamespace,
+		"policy_name":            policyName,
+		"rule_name":              ruleName,
+		"rule_type":              string(ruleType),
+		"status_ready":           status,
+	}).Set(metricValue)
 	return nil
 }
 
-func AddPolicy(m *metrics.MetricsConfig, policy kyvernov1.PolicyInterface) error {
+func AddPolicy(pc *metrics.PromConfig, policy kyverno.PolicyInterface) error {
 	name, namespace, policyType, backgroundMode, validationMode, err := metrics.GetPolicyInfos(policy)
 	if err != nil {
 		return err
@@ -58,14 +67,14 @@ func AddPolicy(m *metrics.MetricsConfig, policy kyvernov1.PolicyInterface) error
 	for _, rule := range autogen.ComputeRules(policy) {
 		ruleName := rule.Name
 		ruleType := metrics.ParseRuleType(rule)
-		if err = registerPolicyRuleInfoMetric(m, validationMode, policyType, backgroundMode, namespace, name, ruleName, ruleType, PolicyRuleCreated, ready); err != nil {
+		if err = registerPolicyRuleInfoMetric(pc, validationMode, policyType, backgroundMode, namespace, name, ruleName, ruleType, PolicyRuleCreated, ready); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func RemovePolicy(m *metrics.MetricsConfig, policy kyvernov1.PolicyInterface) error {
+func RemovePolicy(pc *metrics.PromConfig, policy kyverno.PolicyInterface) error {
 	name, namespace, policyType, backgroundMode, validationMode, err := metrics.GetPolicyInfos(policy)
 	if err != nil {
 		return err
@@ -74,7 +83,7 @@ func RemovePolicy(m *metrics.MetricsConfig, policy kyvernov1.PolicyInterface) er
 	for _, rule := range autogen.ComputeRules(policy) {
 		ruleName := rule.Name
 		ruleType := metrics.ParseRuleType(rule)
-		if err = registerPolicyRuleInfoMetric(m, validationMode, policyType, backgroundMode, namespace, name, ruleName, ruleType, PolicyRuleDeleted, ready); err != nil {
+		if err = registerPolicyRuleInfoMetric(pc, validationMode, policyType, backgroundMode, namespace, name, ruleName, ruleType, PolicyRuleDeleted, ready); err != nil {
 			return err
 		}
 	}

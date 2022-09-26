@@ -4,14 +4,15 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	"github.com/kyverno/go-wildcard"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
+	engineUtils "github.com/kyverno/kyverno/pkg/engine/utils"
 	"github.com/kyverno/kyverno/pkg/engine/variables"
-	"github.com/kyverno/kyverno/pkg/utils/wildcard"
-	"go.uber.org/multierr"
+	stringutils "github.com/kyverno/kyverno/pkg/utils/string"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func loadTargets(targets []kyvernov1.ResourceSpec, ctx *PolicyContext, logger logr.Logger) ([]unstructured.Unstructured, error) {
+func loadTargets(targets []kyverno.ResourceSpec, ctx *PolicyContext, logger logr.Logger) ([]unstructured.Unstructured, error) {
 	targetObjects := []unstructured.Unstructured{}
 	var errors []error
 
@@ -31,31 +32,31 @@ func loadTargets(targets []kyvernov1.ResourceSpec, ctx *PolicyContext, logger lo
 		targetObjects = append(targetObjects, objs...)
 	}
 
-	return targetObjects, multierr.Combine(errors...)
+	return targetObjects, engineUtils.CombineErrors(errors)
 }
 
-func resolveSpec(i int, target kyvernov1.ResourceSpec, ctx *PolicyContext, logger logr.Logger) (kyvernov1.ResourceSpec, error) {
+func resolveSpec(i int, target kyverno.ResourceSpec, ctx *PolicyContext, logger logr.Logger) (kyverno.ResourceSpec, error) {
 	kind, err := variables.SubstituteAll(logger, ctx.JSONContext, target.Kind)
 	if err != nil {
-		return kyvernov1.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].Kind %s: %v", i, target.Kind, err)
+		return kyverno.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].Kind %s: %v", i, target.Kind, err)
 	}
 
 	apiversion, err := variables.SubstituteAll(logger, ctx.JSONContext, target.APIVersion)
 	if err != nil {
-		return kyvernov1.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].APIVersion %s: %v", i, target.APIVersion, err)
+		return kyverno.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].APIVersion %s: %v", i, target.APIVersion, err)
 	}
 
 	namespace, err := variables.SubstituteAll(logger, ctx.JSONContext, target.Namespace)
 	if err != nil {
-		return kyvernov1.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].Namespace %s: %v", i, target.Namespace, err)
+		return kyverno.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].Namespace %s: %v", i, target.Namespace, err)
 	}
 
 	name, err := variables.SubstituteAll(logger, ctx.JSONContext, target.Name)
 	if err != nil {
-		return kyvernov1.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].Name %s: %v", i, target.Name, err)
+		return kyverno.ResourceSpec{}, fmt.Errorf("failed to substitute variables in target[%d].Name %s: %v", i, target.Name, err)
 	}
 
-	return kyvernov1.ResourceSpec{
+	return kyverno.ResourceSpec{
 		APIVersion: apiversion.(string),
 		Kind:       kind.(string),
 		Namespace:  namespace.(string),
@@ -63,18 +64,17 @@ func resolveSpec(i int, target kyvernov1.ResourceSpec, ctx *PolicyContext, logge
 	}, nil
 }
 
-func getTargets(target kyvernov1.ResourceSpec, ctx *PolicyContext, logger logr.Logger) ([]unstructured.Unstructured, error) {
+func getTargets(target kyverno.ResourceSpec, ctx *PolicyContext, logger logr.Logger) ([]unstructured.Unstructured, error) {
 	var targetObjects []unstructured.Unstructured
 	namespace := target.Namespace
 	name := target.Name
 
 	if namespace != "" && name != "" &&
-		!wildcard.ContainsWildcard(namespace) && !wildcard.ContainsWildcard(name) {
+		!stringutils.ContainsWildcard(namespace) && !stringutils.ContainsWildcard(name) {
 		obj, err := ctx.Client.GetResource(target.APIVersion, target.Kind, namespace, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get target %s/%s %s/%s : %v", target.APIVersion, target.Kind, namespace, name, err)
 		}
-
 		return []unstructured.Unstructured{*obj}, nil
 	}
 

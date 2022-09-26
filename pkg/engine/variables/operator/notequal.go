@@ -6,13 +6,14 @@ import (
 	"reflect"
 	"strconv"
 
+	wildcard "github.com/kyverno/go-wildcard"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/go-logr/logr"
 	"github.com/kyverno/kyverno/pkg/engine/context"
-	wildcard "github.com/kyverno/kyverno/pkg/utils/wildcard"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// NewNotEqualHandler returns handler to manage NotEqual operations
+//NewNotEqualHandler returns handler to manage NotEqual operations
 func NewNotEqualHandler(log logr.Logger, ctx context.EvalInterface) OperatorHandler {
 	return NotEqualHandler{
 		ctx: ctx,
@@ -20,13 +21,13 @@ func NewNotEqualHandler(log logr.Logger, ctx context.EvalInterface) OperatorHand
 	}
 }
 
-// NotEqualHandler provides implementation to handle NotEqual Operator
+//NotEqualHandler provides implementation to handle NotEqual Operator
 type NotEqualHandler struct {
 	ctx context.EvalInterface
 	log logr.Logger
 }
 
-// Evaluate evaluates expression with NotEqual Operator
+//Evaluate evaluates expression with NotEqual Operator
 func (neh NotEqualHandler) Evaluate(key, value interface{}) bool {
 	// key and value need to be of same type
 	switch typedKey := key.(type) {
@@ -45,7 +46,7 @@ func (neh NotEqualHandler) Evaluate(key, value interface{}) bool {
 	case []interface{}:
 		return neh.validateValueWithSlicePattern(typedKey, value)
 	default:
-		neh.log.V(2).Info("Unsupported type", "value", typedKey, "type", fmt.Sprintf("%T", typedKey))
+		neh.log.Info("Unsupported type", "value", typedKey, "type", fmt.Sprintf("%T", typedKey))
 		return false
 	}
 }
@@ -54,7 +55,7 @@ func (neh NotEqualHandler) validateValueWithSlicePattern(key []interface{}, valu
 	if val, ok := value.([]interface{}); ok {
 		return !reflect.DeepEqual(key, val)
 	}
-	neh.log.V(2).Info("Expected type []interface{}", "value", value, "type", fmt.Sprintf("%T", value))
+	neh.log.Info("Expected type []interface{}", "value", value, "type", fmt.Sprintf("%T", value))
 	return true
 }
 
@@ -62,7 +63,7 @@ func (neh NotEqualHandler) validateValueWithMapPattern(key map[string]interface{
 	if val, ok := value.(map[string]interface{}); ok {
 		return !reflect.DeepEqual(key, val)
 	}
-	neh.log.V(2).Info("Expected type map[string]interface{}", "value", value, "type", fmt.Sprintf("%T", value))
+	neh.log.Info("Expected type map[string]interface{}", "value", value, "type", fmt.Sprintf("%T", value))
 	return true
 }
 
@@ -96,7 +97,7 @@ func (neh NotEqualHandler) validateValueWithStringPattern(key string, value inte
 		return !wildcard.Match(val, key)
 	}
 
-	neh.log.V(2).Info("Expected type string", "value", value, "type", fmt.Sprintf("%T", value))
+	neh.log.Info("Expected type string", "value", value, "type", fmt.Sprintf("%T", value))
 	return true
 }
 
@@ -107,13 +108,13 @@ func (neh NotEqualHandler) validateValueWithFloatPattern(key float64, value inte
 		if key == math.Trunc(key) {
 			return int(key) != typedValue
 		}
-		neh.log.V(2).Info("Expected type float, found int", "typedValue", typedValue)
+		neh.log.Info("Expected type float, found int", "typedValue", typedValue)
 	case int64:
 		// check that float has not fraction
 		if key == math.Trunc(key) {
 			return int64(key) != typedValue
 		}
-		neh.log.V(2).Info("Expected type float, found int", "typedValue", typedValue)
+		neh.log.Info("Expected type float, found int", "typedValue", typedValue)
 	case float64:
 		return typedValue != key
 	case string:
@@ -125,7 +126,7 @@ func (neh NotEqualHandler) validateValueWithFloatPattern(key float64, value inte
 		}
 		return float64Num != key
 	default:
-		neh.log.V(2).Info("Expected type float", "value", value, "type", fmt.Sprintf("%T", value))
+		neh.log.Info("Expected type float", "value", value, "type", fmt.Sprintf("%T", value))
 		return true
 	}
 	return true
@@ -134,7 +135,7 @@ func (neh NotEqualHandler) validateValueWithFloatPattern(key float64, value inte
 func (neh NotEqualHandler) validateValueWithBoolPattern(key bool, value interface{}) bool {
 	typedValue, ok := value.(bool)
 	if !ok {
-		neh.log.V(2).Info("Expected type bool", "value", value, "type", fmt.Sprintf("%T", value))
+		neh.log.Info("Expected type bool", "value", value, "type", fmt.Sprintf("%T", value))
 		return true
 	}
 	return key != typedValue
@@ -151,7 +152,7 @@ func (neh NotEqualHandler) validateValueWithIntPattern(key int64, value interfac
 		if typedValue == math.Trunc(typedValue) {
 			return int64(typedValue) != key
 		}
-		neh.log.V(2).Info("Expected type int, found float", "value", typedValue, "type", fmt.Sprintf("%T", typedValue))
+		neh.log.Info("Expected type int, found float", "value", typedValue, "type", fmt.Sprintf("%T", typedValue))
 		return false
 	case string:
 		// extract in64 from string
@@ -162,7 +163,7 @@ func (neh NotEqualHandler) validateValueWithIntPattern(key int64, value interfac
 		}
 		return int64Num != key
 	default:
-		neh.log.V(2).Info("Expected type int", "value", value, "type", fmt.Sprintf("%T", value))
+		neh.log.Info("Expected type int", "value", value, "type", fmt.Sprintf("%T", value))
 		return true
 	}
 }

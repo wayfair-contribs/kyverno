@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	v1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/pkg/engine/response"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -36,13 +36,13 @@ func buildPolicyEventMessage(resp *response.RuleResponse, resource response.Reso
 	}
 
 	if resp.Status == response.RuleStatusError && resp.Message != "" {
-		fmt.Fprintf(&b, "; %s", resp.Message)
+		fmt.Fprintf(&b, "; %s", resp.Status.String())
 	}
 
 	return b.String()
 }
 
-func getPolicyKind(policy kyvernov1.PolicyInterface) string {
+func getPolicyKind(policy v1.PolicyInterface) string {
 	if policy.IsNamespaced() {
 		return "Policy"
 	}
@@ -84,26 +84,6 @@ func NewResourceViolationEvent(source Source, reason Reason, engineResponse *res
 		Name:      resource.Name,
 		Namespace: resource.Namespace,
 		Reason:    reason.String(),
-		Source:    source,
-		Message:   bldr.String(),
-	}
-}
-
-func NewPolicySkippedEvent(source Source, reason Reason, engineResponse *response.EngineResponse, ruleResp *response.RuleResponse) Info {
-	var bldr strings.Builder
-	defer bldr.Reset()
-	resource := engineResponse.GetResourceSpec()
-
-	if resource.Namespace != "" {
-		fmt.Fprintf(&bldr, "%s %s/%s: %s", resource.Kind, resource.Namespace, resource.Name, ruleResp.Status.String())
-	} else {
-		fmt.Fprintf(&bldr, "%s %s: %s", resource.Kind, resource.Name, ruleResp.Status.String())
-	}
-	return Info{
-		Kind:      getPolicyKind(engineResponse.Policy),
-		Name:      engineResponse.PolicyResponse.Policy.Name,
-		Namespace: engineResponse.PolicyResponse.Policy.Namespace,
-		Reason:    PolicySkipped.String(),
 		Source:    source,
 		Message:   bldr.String(),
 	}

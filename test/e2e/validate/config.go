@@ -7,7 +7,7 @@ import (
 
 // FluxValidateTests is E2E Test Config for validation
 var FluxValidateTests = []struct {
-	// TestName - Name of the Test
+	//TestName - Name of the Test
 	TestName string
 	// PolicyRaw - The Yaml file of the ClusterPolicy
 	PolicyRaw []byte
@@ -34,13 +34,10 @@ var FluxValidateTests = []struct {
 	},
 }
 
-var (
-	podGVR        = e2e.GetGVR("", "v1", "pods")
-	deploymentGVR = e2e.GetGVR("apps", "v1", "deployments")
-)
+var podGVR = e2e.GetGVR("", "v1", "pods")
 
 var ValidateTests = []struct {
-	// TestDescription - Description of the Test
+	//TestDescription - Description of the Test
 	TestDescription string
 	// PolicyName - Name of the Policy
 	PolicyName string
@@ -133,27 +130,5 @@ var ValidateTests = []struct {
 		ResourceGVR:       podGVR,
 		ResourceRaw:       kyverno_pod_with_large_image,
 		MustSucceed:       false,
-	},
-	{
-		// Case for yaml signing validation
-		TestDescription:   "checks that unsigned yaml manifest is blocked",
-		PolicyName:        "check-yaml-signing",
-		PolicyRaw:         kyverno_yaml_signing_validate_policy,
-		ResourceName:      "test-deployment",
-		ResourceNamespace: "test-validate",
-		ResourceGVR:       deploymentGVR,
-		ResourceRaw:       kyverno_yaml_signing_validate_resource_1,
-		MustSucceed:       false,
-	},
-	{
-		// Case for yaml signing validation
-		TestDescription:   "checks that signed yaml manifest is created",
-		PolicyName:        "check-yaml-signing",
-		PolicyRaw:         kyverno_yaml_signing_validate_policy,
-		ResourceName:      "test-deployment",
-		ResourceNamespace: "test-validate",
-		ResourceGVR:       deploymentGVR,
-		ResourceRaw:       kyverno_yaml_signing_validate_resource_2,
-		MustSucceed:       true,
 	},
 }

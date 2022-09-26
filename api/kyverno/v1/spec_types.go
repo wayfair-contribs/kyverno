@@ -30,23 +30,15 @@ type Spec struct {
 	// each rule can validate, mutate, or generate resources.
 	Rules []Rule `json:"rules,omitempty" yaml:"rules,omitempty"`
 
-	// ApplyRules controls how rules in a policy are applied. Rule are processed in
-	// the order of declaration. When set to `One` processing stops after a rule has
-	// been applied i.e. the rule matches and results in a pass, fail, or error. When
-	// set to `All` all rules in the policy are processed. The default is `All`.
-	// +optional
-	ApplyRules *ApplyRulesType `json:"applyRules,omitempty" yaml:"applyRules,omitempty"`
-
-	// FailurePolicy defines how unexpected policy errors and webhook response timeout errors are handled.
+	// FailurePolicy defines how unrecognized errors from the admission endpoint are handled.
 	// Rules within the same policy share the same failure behavior.
 	// Allowed values are Ignore or Fail. Defaults to Fail.
 	// +optional
 	FailurePolicy *FailurePolicyType `json:"failurePolicy,omitempty" yaml:"failurePolicy,omitempty"`
 
-	// ValidationFailureAction defines if a validation policy rule violation should block
+	// ValidationFailureAction controls if a validation policy rule failure should disallow
 	// the admission review request (enforce), or allow (audit) the admission review request
-	// and report an error in a policy report. Optional.
-	// Allowed values are audit or enforce. The default value is "audit".
+	// and report an error in a policy report. Optional. The default value is "audit".
 	// +optional
 	// +kubebuilder:validation:Enum=audit;enforce
 	ValidationFailureAction ValidationFailureAction `json:"validationFailureAction,omitempty" yaml:"validationFailureAction,omitempty"`
@@ -60,7 +52,6 @@ type Spec struct {
 	// Optional. Default value is "true". The value must be set to "false" if the policy rule
 	// uses variables that are only available in the admission review request (e.g. user name).
 	// +optional
-	// +kubebuilder:default=true
 	Background *bool `json:"background,omitempty" yaml:"background,omitempty"`
 
 	// SchemaValidation skips policy validation checks.
@@ -78,7 +69,7 @@ type Spec struct {
 	// +optional
 	MutateExistingOnPolicyUpdate bool `json:"mutateExistingOnPolicyUpdate,omitempty" yaml:"mutateExistingOnPolicyUpdate,omitempty"`
 
-	// GenerateExistingOnPolicyUpdate controls whether to trigger generate rule in existing resources
+	// GenerateExistingOnPolicyUpdate controls wether to trigger generate rule in existing resources
 	// If is set to "true" generate rule will be triggered and applied to existing matched resources.
 	// Defaults to "false" if not specified.
 	// +optional
@@ -154,17 +145,6 @@ func (s *Spec) HasVerifyImages() bool {
 	return false
 }
 
-// HasYAMLSignatureVerify checks for image verification rules invoked during resource mutation
-func (s *Spec) HasYAMLSignatureVerify() bool {
-	for _, rule := range s.Rules {
-		if rule.HasYAMLSignatureVerify() {
-			return true
-		}
-	}
-
-	return false
-}
-
 // BackgroundProcessingEnabled checks if background is set to true
 func (s *Spec) BackgroundProcessingEnabled() bool {
 	if s.Background == nil {
@@ -209,14 +189,6 @@ func (s *Spec) GetValidationFailureAction() ValidationFailureAction {
 	}
 
 	return s.ValidationFailureAction
-}
-
-// GetFailurePolicy returns the failure policy to be applied
-func (s *Spec) GetApplyRules() ApplyRulesType {
-	if s.ApplyRules == nil {
-		return ApplyAll
-	}
-	return *s.ApplyRules
 }
 
 // ValidateRuleNames checks if the rule names are unique across a policy

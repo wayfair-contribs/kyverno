@@ -3,8 +3,9 @@ package wildcards
 import (
 	"strings"
 
+	wildcard "github.com/kyverno/go-wildcard"
 	commonAnchor "github.com/kyverno/kyverno/pkg/engine/anchor"
-	wildcard "github.com/kyverno/kyverno/pkg/utils/wildcard"
+	stringutils "github.com/kyverno/kyverno/pkg/utils/string"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -20,7 +21,7 @@ func ReplaceInSelector(labelSelector *metav1.LabelSelector, resourceLabels map[s
 func replaceWildcardsInMapKeyValues(patternMap map[string]string, resourceMap map[string]string) map[string]string {
 	result := map[string]string{}
 	for k, v := range patternMap {
-		if wildcard.ContainsWildcard(k) || wildcard.ContainsWildcard(v) {
+		if stringutils.ContainsWildcard(k) || stringutils.ContainsWildcard(v) {
 			matchK, matchV := expandWildcards(k, v, resourceMap, true, true)
 			result[matchK] = matchV
 		} else {
@@ -63,6 +64,7 @@ func replaceWildCardChars(s string) string {
 // here, as they are evaluated separately while processing the validation pattern. Anchors
 // on the tags (e.g. "=(kubernetes.io/*)" will be preserved when the values are expanded.
 func ExpandInMetadata(patternMap, resourceMap map[string]interface{}) map[string]interface{} {
+
 	_, patternMetadata := getPatternValue("metadata", patternMap)
 	if patternMetadata == nil {
 		return patternMap
@@ -139,7 +141,7 @@ func getValueAsStringMap(key string, data interface{}) (string, map[string]strin
 func replaceWildcardsInMapKeys(patternData, resourceData map[string]string) map[string]interface{} {
 	results := map[string]interface{}{}
 	for k, v := range patternData {
-		if wildcard.ContainsWildcard(k) {
+		if stringutils.ContainsWildcard(k) {
 			anchorFreeKey, anchorPrefix := commonAnchor.RemoveAnchor(k)
 			matchK, _ := expandWildcards(anchorFreeKey, v, resourceData, false, false)
 			if anchorPrefix != "" {

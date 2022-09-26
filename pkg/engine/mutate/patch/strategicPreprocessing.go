@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/pkg/errors"
+
 	"github.com/go-logr/logr"
 	"github.com/kyverno/kyverno/pkg/engine/anchor"
 	"github.com/kyverno/kyverno/pkg/engine/validate"
-	"github.com/pkg/errors"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
@@ -296,8 +297,10 @@ func hasAnchor(key string) bool {
 }
 
 func hasAnchors(pattern *yaml.RNode, isAnchor func(key string) bool) bool {
-	ynode := pattern.YNode() //nolint:ifshort
-	if ynode.Kind == yaml.MappingNode {
+	ynode := pattern.YNode()
+	kind := ynode.Kind
+
+	if kind == yaml.MappingNode {
 		fields, err := pattern.Fields()
 		if err != nil {
 			return false
@@ -315,10 +318,11 @@ func hasAnchors(pattern *yaml.RNode, isAnchor func(key string) bool) bool {
 				}
 			}
 		}
-	} else if ynode.Kind == yaml.ScalarNode {
+	} else if kind == yaml.ScalarNode {
 		v := ynode.Value
 		return anchor.ContainsCondition(v)
-	} else if ynode.Kind == yaml.SequenceNode {
+
+	} else if kind == yaml.SequenceNode {
 		elements, _ := pattern.Elements()
 		for _, e := range elements {
 			if hasAnchors(e, isAnchor) {

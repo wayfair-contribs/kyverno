@@ -32,6 +32,6 @@ func JoinPatches(patches ...[]byte) []byte {
 		return nil
 	}
 
-	result := "[" + strings.Join(patchOperations, ", ") + "]"
+	result := "[" + strings.Join(patchOperations, ",\n") + "]"
 	return []byte(result)
 }

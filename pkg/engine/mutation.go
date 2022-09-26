@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	gojmespath "github.com/jmespath/go-jmespath"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/utils/store"
 	"github.com/kyverno/kyverno/pkg/autogen"
 	"github.com/kyverno/kyverno/pkg/engine/mutate"
@@ -39,7 +39,6 @@ func Mutate(policyContext *PolicyContext) (resp *response.EngineResponse) {
 	defer policyContext.JSONContext.Restore()
 
 	var err error
-	applyRules := policy.GetSpec().GetApplyRules()
 
 	for _, rule := range autogen.ComputeRules(policy) {
 		if !rule.HasMutate() {
@@ -58,7 +57,8 @@ func Mutate(policyContext *PolicyContext) (resp *response.EngineResponse) {
 			continue
 		}
 
-		logger.V(3).Info("processing mutate rule", "applyRules", applyRules)
+		logger.V(3).Info("matched mutate rule")
+
 		resource, err := policyContext.JSONContext.Query("request.object")
 		policyContext.JSONContext.Reset()
 		if err == nil && resource != nil {
@@ -124,10 +124,6 @@ func Mutate(policyContext *PolicyContext) (resp *response.EngineResponse) {
 				}
 			}
 		}
-
-		if applyRules == kyvernov1.ApplyOne && resp.PolicyResponse.RulesAppliedCount > 0 {
-			break
-		}
 	}
 
 	for _, r := range resp.PolicyResponse.Rules {
@@ -143,7 +139,7 @@ func Mutate(policyContext *PolicyContext) (resp *response.EngineResponse) {
 	return resp
 }
 
-func mutateResource(rule *kyvernov1.Rule, ctx *PolicyContext, resource unstructured.Unstructured, logger logr.Logger) (*response.RuleResponse, unstructured.Unstructured) {
+func mutateResource(rule *kyverno.Rule, ctx *PolicyContext, resource unstructured.Unstructured, logger logr.Logger) (*response.RuleResponse, unstructured.Unstructured) {
 	preconditionsPassed, err := checkPreconditions(logger, ctx, rule.GetAnyAllConditions())
 	if err != nil {
 		return ruleError(rule, response.Mutation, "failed to evaluate preconditions", err), resource
@@ -158,7 +154,7 @@ func mutateResource(rule *kyvernov1.Rule, ctx *PolicyContext, resource unstructu
 	return ruleResp, mutateResp.PatchedResource
 }
 
-func mutateForEach(rule *kyvernov1.Rule, ctx *PolicyContext, resource unstructured.Unstructured, logger logr.Logger) (*response.RuleResponse, unstructured.Unstructured) {
+func mutateForEach(rule *kyverno.Rule, ctx *PolicyContext, resource unstructured.Unstructured, logger logr.Logger) (*response.RuleResponse, unstructured.Unstructured) {
 	foreachList := rule.Mutation.ForEachMutation
 	if foreachList == nil {
 		return nil, resource
@@ -213,7 +209,7 @@ func mutateForEach(rule *kyvernov1.Rule, ctx *PolicyContext, resource unstructur
 	return r, patchedResource
 }
 
-func mutateElements(name string, foreach kyvernov1.ForEachMutation, ctx *PolicyContext, elements []interface{}, resource unstructured.Unstructured, logger logr.Logger) *mutate.Response {
+func mutateElements(name string, foreach kyverno.ForEachMutation, ctx *PolicyContext, elements []interface{}, resource unstructured.Unstructured, logger logr.Logger) *mutate.Response {
 	ctx.JSONContext.Checkpoint()
 	defer ctx.JSONContext.Restore()
 
@@ -274,7 +270,7 @@ func mutateError(err error, message string) *mutate.Response {
 	}
 }
 
-func buildRuleResponse(rule *kyvernov1.Rule, mutateResp *mutate.Response, patchedResource *unstructured.Unstructured) *response.RuleResponse {
+func buildRuleResponse(rule *kyverno.Rule, mutateResp *mutate.Response, patchedResource *unstructured.Unstructured) *response.RuleResponse {
 	resp := ruleResponse(*rule, response.Mutation, mutateResp.Message, mutateResp.Status, patchedResource)
 	if resp.Status == response.RuleStatusPass {
 		resp.Patches = mutateResp.Patches
@@ -289,14 +285,15 @@ func buildSuccessMessage(r unstructured.Unstructured) string {
 		return "mutated resource"
 	}
 
-	if r.GetNamespace() == "" {
+	ns := r.GetNamespace()
+	if ns == "" {
 		return fmt.Sprintf("mutated %s/%s", r.GetKind(), r.GetName())
 	}
 
 	return fmt.Sprintf("mutated %s/%s in namespace %s", r.GetKind(), r.GetName(), r.GetNamespace())
 }
 
-func startMutateResultResponse(resp *response.EngineResponse, policy kyvernov1.PolicyInterface, resource unstructured.Unstructured) {
+func startMutateResultResponse(resp *response.EngineResponse, policy kyverno.PolicyInterface, resource unstructured.Unstructured) {
 	if resp == nil {
 		return
 	}

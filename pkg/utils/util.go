@@ -6,12 +6,14 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/go-logr/logr"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
-	"github.com/kyverno/kyverno/pkg/clients/dclient"
-	engineutils "github.com/kyverno/kyverno/pkg/engine/utils"
-	wildcard "github.com/kyverno/kyverno/pkg/utils/wildcard"
+	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	"github.com/pkg/errors"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/go-logr/logr"
+	wildcard "github.com/kyverno/go-wildcard"
+	client "github.com/kyverno/kyverno/pkg/dclient"
+	engineutils "github.com/kyverno/kyverno/pkg/engine/utils"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -19,7 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/discovery"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var regexVersion = regexp.MustCompile(`v(\d+).(\d+).(\d+)\.*`)
@@ -100,7 +101,7 @@ func compareString(str, name string) bool {
 }
 
 // CRDsInstalled checks if the Kyverno CRDs are installed or not
-func CRDsInstalled(discovery dclient.IDiscovery) bool {
+func CRDsInstalled(discovery client.IDiscovery) bool {
 	kyvernoCRDs := []string{"ClusterPolicy", "ClusterPolicyReport", "PolicyReport", "ClusterReportChangeRequest", "ReportChangeRequest"}
 	for _, crd := range kyvernoCRDs {
 		if !isCRDInstalled(discovery, crd) {
@@ -111,7 +112,7 @@ func CRDsInstalled(discovery dclient.IDiscovery) bool {
 	return true
 }
 
-func isCRDInstalled(discoveryClient dclient.IDiscovery, kind string) bool {
+func isCRDInstalled(discoveryClient client.IDiscovery, kind string) bool {
 	gvr, err := discoveryClient.GetGVRFromKind(kind)
 	if gvr.Empty() {
 		if err == nil {
@@ -122,7 +123,7 @@ func isCRDInstalled(discoveryClient dclient.IDiscovery, kind string) bool {
 		return false
 	}
 
-	log.Log.V(2).Info("CRD found", "gvr", gvr.String())
+	log.Log.Info("CRD found", "gvr", gvr.String())
 	return true
 }
 
@@ -265,7 +266,8 @@ func isVersionHigher(version string, major int, minor int, patch int) (bool, err
 
 // SliceContains checks whether values are contained in slice
 func SliceContains(slice []string, values ...string) bool {
-	sliceElementsMap := make(map[string]bool, len(slice))
+
+	var sliceElementsMap = make(map[string]bool, len(slice))
 	for _, sliceElement := range slice {
 		sliceElementsMap[sliceElement] = true
 	}
@@ -309,12 +311,12 @@ func ApiextensionsJsonToKyvernoConditions(original apiextensions.JSON) (interfac
 		return nil, fmt.Errorf("error occurred while marshalling %s: %+v", path, err)
 	}
 
-	var kyvernoOldConditions []kyvernov1.Condition
+	var kyvernoOldConditions []kyverno.Condition
 	if err = json.Unmarshal(jsonByte, &kyvernoOldConditions); err == nil {
 		var validConditionOperator bool
 
 		for _, jsonOp := range kyvernoOldConditions {
-			for _, validOp := range kyvernov1.ConditionOperators {
+			for _, validOp := range kyverno.ConditionOperators {
 				if jsonOp.Operator == validOp {
 					validConditionOperator = true
 				}
@@ -328,7 +330,7 @@ func ApiextensionsJsonToKyvernoConditions(original apiextensions.JSON) (interfac
 		return kyvernoOldConditions, nil
 	}
 
-	var kyvernoAnyAllConditions kyvernov1.AnyAllConditions
+	var kyvernoAnyAllConditions kyverno.AnyAllConditions
 	if err = json.Unmarshal(jsonByte, &kyvernoAnyAllConditions); err == nil {
 		// checking if unknown fields exist or not
 		err = unknownFieldChecker(jsonByte, path)
@@ -344,12 +346,13 @@ func OverrideRuntimeErrorHandler() {
 	logger := log.Log.WithName("RuntimeErrorHandler")
 	if len(runtime.ErrorHandlers) > 0 {
 		runtime.ErrorHandlers[0] = func(err error) {
-			logger.V(6).Info("runtime error", "msg", err.Error())
+			logger.V(6).Info("runtime error: %s", err)
 		}
+
 	} else {
 		runtime.ErrorHandlers = []func(err error){
 			func(err error) {
-				logger.V(6).Info("runtime error", "msg", err.Error())
+				logger.V(6).Info("runtime error: %s", err)
 			},
 		}
 	}

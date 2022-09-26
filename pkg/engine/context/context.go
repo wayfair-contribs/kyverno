@@ -241,13 +241,12 @@ func (ctx *context) AddElement(data interface{}, index int) error {
 
 func (ctx *context) AddImageInfo(info apiutils.ImageInfo) error {
 	data := map[string]interface{}{
-		"reference":        info.String(),
-		"referenceWithTag": info.ReferenceWithTag(),
-		"registry":         info.Registry,
-		"path":             info.Path,
-		"name":             info.Name,
-		"tag":              info.Tag,
-		"digest":           info.Digest,
+		"image":    info.String(),
+		"registry": info.Registry,
+		"path":     info.Path,
+		"name":     info.Name,
+		"tag":      info.Tag,
+		"digest":   info.Digest,
 	}
 	return addToContext(ctx, data, "image")
 }

@@ -6,29 +6,32 @@ import (
 	"github.com/kyverno/kyverno/pkg/engine/response"
 	"github.com/kyverno/kyverno/pkg/metrics"
 	"github.com/kyverno/kyverno/pkg/utils"
+	prom "github.com/prometheus/client_golang/prometheus"
 )
 
 func registerAdmissionRequestsMetric(
-	m *metrics.MetricsConfig,
+	pc *metrics.PromConfig,
 	resourceKind, resourceNamespace string,
 	resourceRequestOperation metrics.ResourceRequestOperation,
 ) error {
-	includeNamespaces, excludeNamespaces := m.Config.GetIncludeNamespaces(), m.Config.GetExcludeNamespaces()
+	includeNamespaces, excludeNamespaces := pc.Config.GetIncludeNamespaces(), pc.Config.GetExcludeNamespaces()
 	if (resourceNamespace != "" && resourceNamespace != "-") && utils.ContainsString(excludeNamespaces, resourceNamespace) {
-		m.Log.V(2).Info(fmt.Sprintf("Skipping the registration of kyverno_admission_requests_total metric as the operation belongs to the namespace '%s' which is one of 'namespaces.exclude' %+v in values.yaml", resourceNamespace, excludeNamespaces))
+		metrics.Logger().Info(fmt.Sprintf("Skipping the registration of kyverno_admission_requests_total metric as the operation belongs to the namespace '%s' which is one of 'namespaces.exclude' %+v in values.yaml", resourceNamespace, excludeNamespaces))
 		return nil
 	}
 	if (resourceNamespace != "" && resourceNamespace != "-") && len(includeNamespaces) > 0 && !utils.ContainsString(includeNamespaces, resourceNamespace) {
-		m.Log.V(2).Info(fmt.Sprintf("Skipping the registration of kyverno_admission_requests_total metric as the operation belongs to the namespace '%s' which is not one of 'namespaces.include' %+v in values.yaml", resourceNamespace, includeNamespaces))
+		metrics.Logger().Info(fmt.Sprintf("Skipping the registration of kyverno_admission_requests_total metric as the operation belongs to the namespace '%s' which is not one of 'namespaces.include' %+v in values.yaml", resourceNamespace, includeNamespaces))
 		return nil
 	}
-
-	m.RecordAdmissionRequests(resourceKind, resourceNamespace, resourceRequestOperation)
-
+	pc.Metrics.AdmissionRequests.With(prom.Labels{
+		"resource_kind":              resourceKind,
+		"resource_namespace":         resourceNamespace,
+		"resource_request_operation": string(resourceRequestOperation),
+	}).Inc()
 	return nil
 }
 
-func ProcessEngineResponses(m *metrics.MetricsConfig, engineResponses []*response.EngineResponse, resourceRequestOperation metrics.ResourceRequestOperation) error {
+func ProcessEngineResponses(pc *metrics.PromConfig, engineResponses []*response.EngineResponse, resourceRequestOperation metrics.ResourceRequestOperation) error {
 	if len(engineResponses) == 0 {
 		return nil
 	}
@@ -49,5 +52,5 @@ func ProcessEngineResponses(m *metrics.MetricsConfig, engineResponses []*respons
 	if validateRulesCount == 0 && mutateRulesCount == 0 && generateRulesCount == 0 {
 		return nil
 	}
-	return registerAdmissionRequestsMetric(m, resourceKind, resourceNamespace, resourceRequestOperation)
+	return registerAdmissionRequestsMetric(pc, resourceKind, resourceNamespace, resourceRequestOperation)
 }

@@ -8,10 +8,9 @@ import (
 	"strings"
 
 	"github.com/cornelk/hashmap"
-	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
-	kyvernov1alpha2 "github.com/kyverno/kyverno/api/kyverno/v1alpha2"
-	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
-	"github.com/kyverno/kyverno/pkg/client/clientset/versioned"
+	changerequest "github.com/kyverno/kyverno/api/kyverno/v1alpha2"
+	report "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
+	kyvernoclient "github.com/kyverno/kyverno/pkg/client/clientset/versioned"
 	kyvernov1alpha2listers "github.com/kyverno/kyverno/pkg/client/listers/kyverno/v1alpha2"
 	policyreportv1alpha2listers "github.com/kyverno/kyverno/pkg/client/listers/policyreport/v1alpha2"
 	"github.com/kyverno/kyverno/pkg/config"
@@ -26,8 +25,8 @@ type PolicyReportEraser interface {
 }
 
 type (
-	CleanupReportChangeRequests = func(pclient versioned.Interface, rcrLister kyvernov1alpha2listers.ReportChangeRequestLister, crcrLister kyvernov1alpha2listers.ClusterReportChangeRequestLister, labels map[string]string) error
-	EraseResultEntries          = func(pclient versioned.Interface, reportLister policyreportv1alpha2listers.PolicyReportLister, clusterReportLister policyreportv1alpha2listers.ClusterPolicyReportLister, ns *string) error
+	CleanupReportChangeRequests = func(pclient kyvernoclient.Interface, rcrLister kyvernov1alpha2listers.ReportChangeRequestLister, crcrLister kyvernov1alpha2listers.ClusterReportChangeRequestLister, labels map[string]string) error
+	EraseResultEntries          = func(pclient kyvernoclient.Interface, reportLister policyreportv1alpha2listers.PolicyReportLister, clusterReportLister policyreportv1alpha2listers.ClusterPolicyReportLister, ns *string) error
 )
 
 func (g *ReportGenerator) CleanupReportChangeRequests(cleanup CleanupReportChangeRequests, labels map[string]string) error {
@@ -62,14 +61,14 @@ func buildLabelForDeletedResource(labels, annotations map[string]string) *delete
 }
 
 func getDeletedResources(aggregatedRequests interface{}) (resources []deletedResource) {
-	if requests, ok := aggregatedRequests.([]*kyvernov1alpha2.ClusterReportChangeRequest); ok {
+	if requests, ok := aggregatedRequests.([]*changerequest.ClusterReportChangeRequest); ok {
 		for _, request := range requests {
 			dr := buildLabelForDeletedResource(request.GetLabels(), request.GetAnnotations())
 			if dr != nil {
 				resources = append(resources, *dr)
 			}
 		}
-	} else if requests, ok := aggregatedRequests.([]*kyvernov1alpha2.ReportChangeRequest); ok {
+	} else if requests, ok := aggregatedRequests.([]*changerequest.ReportChangeRequest); ok {
 		for _, request := range requests {
 			dr := buildLabelForDeletedResource(request.GetLabels(), request.GetAnnotations())
 			if dr != nil {
@@ -106,7 +105,7 @@ func updateResults(oldReport, newReport map[string]interface{}, aggregatedReques
 		return nil, hasDuplicate, err
 	}
 
-	summaryResults := []policyreportv1alpha2.PolicyReportResult{}
+	summaryResults := []report.PolicyReportResult{}
 	if err := mapToStruct(results, &summaryResults); err != nil {
 		return nil, hasDuplicate, err
 	}
@@ -151,6 +150,7 @@ func getResultsFromHash(resHash *hashmap.HashMap) []interface{} {
 		}
 
 		results = append(results, result.Value.(map[string]interface{}))
+
 	}
 	return results
 }
@@ -172,6 +172,7 @@ func generateHashKey(result map[string]interface{}, dr deletedResource) (string,
 				return "", false
 			}
 		}
+
 	}
 
 	return fmt.Sprintf(
@@ -183,20 +184,20 @@ func generateHashKey(result map[string]interface{}, dr deletedResource) (string,
 		resource["name"]), true
 }
 
-func updateSummary(results []policyreportv1alpha2.PolicyReportResult) policyreportv1alpha2.PolicyReportSummary {
-	summary := policyreportv1alpha2.PolicyReportSummary{}
+func updateSummary(results []report.PolicyReportResult) report.PolicyReportSummary {
+	summary := report.PolicyReportSummary{}
 
 	for _, result := range results {
 		switch result.Result {
-		case policyreportv1alpha2.StatusPass:
+		case report.StatusPass:
 			summary.Pass++
-		case policyreportv1alpha2.StatusFail:
+		case report.StatusFail:
 			summary.Fail++
-		case policyreportv1alpha2.StatusWarn:
+		case report.StatusWarn:
 			summary.Warn++
-		case policyreportv1alpha2.StatusError:
+		case report.StatusError:
 			summary.Error++
-		case policyreportv1alpha2.StatusSkip:
+		case report.StatusSkip:
 			summary.Skip++
 		}
 	}
@@ -226,19 +227,19 @@ func mapToStruct(in, out interface{}) error {
 	return json.Unmarshal(jsonBytes, out)
 }
 
-func CleanupPolicyReport(client versioned.Interface) error {
+func CleanupPolicyReport(client kyvernoclient.Interface) error {
 	var errors []string
 	var gracePeriod int64 = 0
 
 	deleteOptions := metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}
-	selector := labels.SelectorFromSet(labels.Set(map[string]string{LabelSelectorKey: kyvernov1.ValueKyvernoApp}))
+	selector := labels.SelectorFromSet(labels.Set(map[string]string{LabelSelectorKey: LabelSelectorValue}))
 
 	err := client.KyvernoV1alpha2().ClusterReportChangeRequests().DeleteCollection(context.TODO(), deleteOptions, metav1.ListOptions{})
 	if err != nil {
 		errors = append(errors, err.Error())
 	}
 
-	err = client.KyvernoV1alpha2().ReportChangeRequests(config.KyvernoNamespace()).DeleteCollection(context.TODO(), deleteOptions, metav1.ListOptions{})
+	err = client.KyvernoV1alpha2().ReportChangeRequests(config.KyvernoNamespace).DeleteCollection(context.TODO(), deleteOptions, metav1.ListOptions{})
 	if err != nil {
 		errors = append(errors, err.Error())
 	}

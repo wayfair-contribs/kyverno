@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	wildcard "github.com/kyverno/kyverno/pkg/utils/wildcard"
+	wildcard "github.com/kyverno/go-wildcard"
 	"github.com/mattbaird/jsonpatch"
 )
 
@@ -66,6 +66,7 @@ func getIndexToBeReversed(patches []jsonpatch.JsonPatchOperation) [][]int {
 		}
 	}
 	return getRemoveInterval(removePaths)
+
 }
 
 func getRemoveInterval(removePaths []string) [][]int {

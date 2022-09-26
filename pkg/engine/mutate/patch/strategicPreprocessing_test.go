@@ -854,7 +854,8 @@ func Test_preProcessStrategicMergePatch_multipleAnchors(t *testing.T) {
 
 func toJSON(t *testing.T, b []byte) interface{} {
 	var i interface{}
-	err := json.Unmarshal(b, &i)
+	var err error
+	err = json.Unmarshal(b, &i)
 	assert.NilError(t, err)
 	return i
 }
